@@ -11,6 +11,7 @@ from transformers import (
 from peft import LoraConfig, get_peft_model, TaskType
 from dotenv import load_dotenv
 from huggingface_hub import login
+import os
 
 load_dotenv()
 
