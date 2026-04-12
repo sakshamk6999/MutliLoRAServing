@@ -93,8 +93,9 @@ def main():
         examples, tokenizer, args.instruction_column, args.label_column, args.max_length
     )
 
-    train_dataset = dataset["train"].map(tokenize_fn, batched=True, remove_columns=dataset["train"].column_names)
-    eval_dataset = dataset["val"].map(tokenize_fn, batched=True, remove_columns=dataset["val"].column_names)
+    print("first train data", dataset['train'][0])
+    train_dataset = dataset["train"].map(tokenize_fn, batched=True)
+    eval_dataset = dataset["val"].map(tokenize_fn, batched=True)
 
     print("train dataset length", len(train_dataset))
     print("eval dataset length", len(eval_dataset))
