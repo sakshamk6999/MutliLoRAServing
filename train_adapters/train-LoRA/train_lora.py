@@ -1,5 +1,5 @@
 import argparse
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -87,7 +87,7 @@ def main():
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    dataset = load_dataset(args.dataset_name)
+    dataset = load_from_disk(args.dataset_name)
 
     tokenize_fn = lambda examples: tokenize(
         examples, tokenizer, args.instruction_column, args.label_column, args.max_length
