@@ -88,7 +88,10 @@ def main():
     )
 
     train_dataset = dataset["train"].map(tokenize_fn, batched=True, remove_columns=dataset["train"].column_names)
-    eval_dataset = dataset["validation"].map(tokenize_fn, batched=True, remove_columns=dataset["validation"].column_names)
+    eval_dataset = dataset["val"].map(tokenize_fn, batched=True, remove_columns=dataset["val"].column_names)
+
+    print("train dataset length", len(train_dataset))
+    print("eval dataset length", len(eval_dataset))
 
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=model, padding=True, pad_to_multiple_of=8)
 
