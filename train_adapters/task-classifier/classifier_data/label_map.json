@@ -1,0 +1,8 @@
+{
+  "diagnosis": 0,
+  "grounded_qa": 1,
+  "implementation": 2,
+  "information_extraction": 3,
+  "rewriting_and_drafting": 4,
+  "safe_refusal": 5
+}

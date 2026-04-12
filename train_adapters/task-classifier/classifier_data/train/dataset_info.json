@@ -1,0 +1,90 @@
+{
+  "builder_name": "parquet",
+  "citation": "",
+  "config_name": "default",
+  "dataset_name": "eval_llm-30000_x",
+  "dataset_size": 30817275,
+  "description": "",
+  "download_checksums": {
+    "hf://datasets/8F-ai/EvalLLM-30000X@dc51538744baddcafe0893036fdaaec1f2b851aa/data/analysis/train-00000-of-00002.parquet": {
+      "num_bytes": 28754,
+      "checksum": null
+    },
+    "hf://datasets/8F-ai/EvalLLM-30000X@dc51538744baddcafe0893036fdaaec1f2b851aa/data/analysis/train-00001-of-00002.parquet": {
+      "num_bytes": 28843,
+      "checksum": null
+    },
+    "hf://datasets/8F-ai/EvalLLM-30000X@dc51538744baddcafe0893036fdaaec1f2b851aa/data/coding/train-00000-of-00002.parquet": {
+      "num_bytes": 69267,
+      "checksum": null
+    },
+    "hf://datasets/8F-ai/EvalLLM-30000X@dc51538744baddcafe0893036fdaaec1f2b851aa/data/coding/train-00001-of-00002.parquet": {
+      "num_bytes": 69829,
+      "checksum": null
+    },
+    "hf://datasets/8F-ai/EvalLLM-30000X@dc51538744baddcafe0893036fdaaec1f2b851aa/data/grounded/train-00000-of-00002.parquet": {
+      "num_bytes": 50640,
+      "checksum": null
+    },
+    "hf://datasets/8F-ai/EvalLLM-30000X@dc51538744baddcafe0893036fdaaec1f2b851aa/data/grounded/train-00001-of-00002.parquet": {
+      "num_bytes": 40278,
+      "checksum": null
+    },
+    "hf://datasets/8F-ai/EvalLLM-30000X@dc51538744baddcafe0893036fdaaec1f2b851aa/data/safety/train-00000-of-00002.parquet": {
+      "num_bytes": 23460,
+      "checksum": null
+    },
+    "hf://datasets/8F-ai/EvalLLM-30000X@dc51538744baddcafe0893036fdaaec1f2b851aa/data/safety/train-00001-of-00002.parquet": {
+      "num_bytes": 23574,
+      "checksum": null
+    },
+    "hf://datasets/8F-ai/EvalLLM-30000X@dc51538744baddcafe0893036fdaaec1f2b851aa/data/structured/train-00000-of-00002.parquet": {
+      "num_bytes": 29130,
+      "checksum": null
+    },
+    "hf://datasets/8F-ai/EvalLLM-30000X@dc51538744baddcafe0893036fdaaec1f2b851aa/data/structured/train-00001-of-00002.parquet": {
+      "num_bytes": 29331,
+      "checksum": null
+    },
+    "hf://datasets/8F-ai/EvalLLM-30000X@dc51538744baddcafe0893036fdaaec1f2b851aa/data/writing/train-00000-of-00002.parquet": {
+      "num_bytes": 21790,
+      "checksum": null
+    },
+    "hf://datasets/8F-ai/EvalLLM-30000X@dc51538744baddcafe0893036fdaaec1f2b851aa/data/writing/train-00001-of-00002.parquet": {
+      "num_bytes": 21736,
+      "checksum": null
+    }
+  },
+  "download_size": 436632,
+  "features": {
+    "text": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "label": {
+      "dtype": "int64",
+      "_type": "Value"
+    },
+    "task_name": {
+      "dtype": "string",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": "",
+  "size_in_bytes": 31253907,
+  "splits": {
+    "train": {
+      "name": "train",
+      "num_bytes": 30817275,
+      "num_examples": 30000,
+      "dataset_name": "eval_llm-30000_x"
+    }
+  },
+  "version": {
+    "version_str": "0.0.0",
+    "major": 0,
+    "minor": 0,
+    "patch": 0
+  }
+}
