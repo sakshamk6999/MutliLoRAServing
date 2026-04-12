@@ -14,7 +14,7 @@ def main(save_dir:str):
         filtered_dataset = ds.filter(lambda x: x['task_family'] == task)
         split_dataset = filtered_dataset['train'].train_test_split(test_size=0.1)
         further_test_split = split_dataset['test'].train_test_split(test_size=0.5)
-        print("train_size:", len(split_dataset['train']), "test_size:", len(split_dataset['test']))
+        print("train_size:", len(split_dataset['train']), "test_size:", len(further_test_split['train']), "val_size:", len(further_test_split['test']))
 
         total_datasets = DatasetDict({
             'train': split_dataset['train'],
