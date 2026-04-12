@@ -12,7 +12,7 @@ def main(save_dir:str):
     for task in unique_tasks:
         print(f"task is {task}")
         filtered_dataset = ds.filter(lambda x: x['task_family'] == task)
-        split_dataset = filtered_dataset.train_test_split(test_size=0.2)
+        split_dataset = filtered_dataset['train'].train_test_split(test_size=0.2)
         print("train_size:", len(split_dataset['train']), "test_size:", len(split_dataset['test']))
 
         split_dataset.save_to_disk(f"{save_dir}/{task}")
