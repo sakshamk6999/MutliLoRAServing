@@ -1,7 +1,7 @@
 from transformers import AutoTokenizer, AutoModel
 import torch
 import torch.nn.functional as F
-from datasets import load_dataset
+from datasets import load_dataset, DatasetDict
 import argparse
 
 def main(save_dir:str):
@@ -12,10 +12,17 @@ def main(save_dir:str):
     for task in unique_tasks:
         print(f"task is {task}")
         filtered_dataset = ds.filter(lambda x: x['task_family'] == task)
-        split_dataset = filtered_dataset['train'].train_test_split(test_size=0.2)
+        split_dataset = filtered_dataset['train'].train_test_split(test_size=0.1)
+        further_test_split = split_dataset['test'].train_test_split(test_size=0.5)
         print("train_size:", len(split_dataset['train']), "test_size:", len(split_dataset['test']))
 
-        split_dataset.save_to_disk(f"{save_dir}/{task}")
+        total_datasets = DatasetDict({
+            'train': split_dataset['train'],
+            'test': further_test_split['train'],
+            'val': further_test_split['test']
+        })
+
+        total_datasets.save_to_disk(f"{save_dir}/{task}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="process dataset")
