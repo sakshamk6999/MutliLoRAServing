@@ -9,7 +9,12 @@ from transformers import (
     DataCollatorForSeq2Seq,
 )
 from peft import LoraConfig, get_peft_model, TaskType
+from dotenv import load_dotenv
+from huggingface_hub import login
 
+load_dotenv()
+
+login(token=os.getenv("HUGGING_FACE_LOGIN_TOKEN"))
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Supervised fine-tuning with LoRA adapters")
