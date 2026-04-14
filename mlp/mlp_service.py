@@ -88,7 +88,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint_path",
         type=str,
-        default="train_adapters/task-classifier/classifier_model/best_model.pt",
+        default="train_adapters/task-classifier/classifier_checkpoint/best_model.pt",
     )
     args = parser.parse_args()
     run(args.checkpoint_path)
