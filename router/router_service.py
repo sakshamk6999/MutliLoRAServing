@@ -23,7 +23,7 @@ def receiver_thread(zmq_ctx: zmq.Context, shared_queue: queue.Queue):
         print(f"[Router:recv] enqueued {tagged.request_id} task={tagged.task_type}")
 
 
-def batcher_thread(shared_queue: queue.Queue, client: ModelServiceClient):
+def router_thread(shared_queue: queue.Queue, client: ModelServiceClient):
     print("[Router:batch] started")
     while True:
         batch = []
@@ -50,13 +50,15 @@ def batcher_thread(shared_queue: queue.Queue, client: ModelServiceClient):
         )
         print(f"[Router:batch] gRPC Prefill status={resp.status}")
 
+def execute_step(queue: queue):
+
 
 def main():
     zmq_ctx = zmq.Context()
     client = ModelServiceClient(GRPC_TARGET)
-    q = queue.Queue()
-    t1 = threading.Thread(target=receiver_thread, args=(zmq_ctx, q), daemon=True, name="recv")
-    t2 = threading.Thread(target=batcher_thread, args=(q, client), daemon=True, name="batch")
+    new_request = queue.Queue()
+    t1 = threading.Thread(target=receiver_thread, args=(zmq_ctx, new_request), daemon=True, name="recv")
+    t2 = threading.Thread(target=router_thread, args=(new_request, client), daemon=True, name="batch")
     t1.start()
     t2.start()
     print("[Router] both threads running")

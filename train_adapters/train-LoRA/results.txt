@@ -1,0 +1,62 @@
+Adapter loaded from: ./adapters/processed_evalllm_datasets_grounded_qa/
+Evaluating on 'test' split: 250 examples
+The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+  250/250
+
+Metric             Score
+-------------------------
+ROUGE-1           0.7488
+ROUGE-2           0.6809
+ROUGE-L           0.7488
+Exact Match       0.0480
+
+Total examples evaluated: 250
+
+── Sample predictions (first 3) ─────────────────────────────────────
+
+Instruction : Answer the question using only the provided excerpt about Signal Harbor. If the excerpt does not support a claim, say th
+Reference   : The review window is 90 days. The important limit is that inactive trial workspaces are archived before permanent deleti
+Prediction  : The review window is 90 days. The important limit is that inactive trial workspaces are archived before permanent deleti
+ROUGE-L=0.9667  EM=0
+
+Instruction : Answer the question using only the provided excerpt about Atlas Queue. If the excerpt does not support a claim, say that
+Reference   : The review window is 14 days. The important limit is that only annual plans are eligible for a refund. The excerpt ties
+Prediction  : The review window is 90 days. The important limit is that inactive trial workspaces are archived before permanent deleti
+ROUGE-L=0.7000  EM=0
+
+Instruction : Answer the question using only the provided excerpt about RidgeNote. If the excerpt does not support a claim, say that d
+Reference   : The review window is 30 days. The important limit is that audit logs are visible only on the business and enterprise tie
+Prediction  : The review window is 30 days. The important limit is that audit logs are visible only on the business and enterprise tie
+ROUGE-L=0.9697  EM=0
+
+
+Adapter loaded from: ./adapters/processed_evalllm_datasets_information_extraction/
+Evaluating on 'test' split: 250 examples
+The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+  250/250
+
+Metric             Score
+-------------------------
+ROUGE-1           0.6782
+ROUGE-2           0.5408
+ROUGE-L           0.6782
+Exact Match       0.0000
+
+Total examples evaluated: 250
+
+── Sample predictions (first 3) ─────────────────────────────────────
+
+Instruction : Convert the note into compact JSON for a shift handoff note. Use exactly these keys: team, risk, deadline, decision_need
+Reference   : {"team": "owner_14", "risk": "medium", "deadline": "investigating", "decision_needed": "review with legal"}
+Prediction  : {"team": "owner_28", "risk": "medium", "deadline": "investigating", "decision_needed": "collect missing logs"}
+ROUGE-L=0.6000  EM=0
+
+Instruction : Convert the note into compact JSON for a project kickoff brief. Use exactly these keys: customer, product, issue, resolu
+Reference   : {"customer": "owner_10", "product": "high", "issue": "blocked", "resolution_target": "prepare rollback note"}
+Prediction  : {"customer": "owner_10", "product": "high", "issue": "blocked", "resolution_target": "confirm root cause"}
+ROUGE-L=0.7000  EM=0
+
+Instruction : Convert the note into compact JSON for a sales call recap. Use exactly these keys: owner, priority, status, next_step.
+Reference   : {"owner": "owner_5", "priority": "low", "status": "new", "next_step": "prepare rollback note"}
+Prediction  : {"owner": "owner_26", "priority": "low", "status": "new", "next_step": "hand off to regional lead"}
+ROUGE-L=0.5455  EM=0
