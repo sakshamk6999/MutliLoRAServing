@@ -154,7 +154,7 @@ def main():
 
     # ── Model ────────────────────────────────────────────────────────────────
     print(f"Loading base model: {args.base_model}")
-    tokenizer = AutoTokenizer.from_pretrained(args.adapter_path, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"   # required for batch generation

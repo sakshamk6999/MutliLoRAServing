@@ -1,0 +1,24 @@
+Evaluating on 'test' split: 1500 examples
+
+Overall accuracy: 1.0000  (1500/1500)
+
+Task                                 Precision     Recall         F1    Support
+--------------------------------------------------------------------------------
+diagnosis                               1.0000     1.0000     1.0000        250
+grounded_qa                             1.0000     1.0000     1.0000        250
+implementation                          1.0000     1.0000     1.0000        250
+information_extraction                  1.0000     1.0000     1.0000        250
+rewriting_and_drafting                  1.0000     1.0000     1.0000        250
+safe_refusal                            1.0000     1.0000     1.0000        250
+--------------------------------------------------------------------------------
+macro avg                               1.0000     1.0000     1.0000       1500
+
+Confusion Matrix (rows=true, cols=predicted):
+                             diagnosis   grounded_qa  implementati  information_  rewriting_an  safe_refusal
+------------------------------------------------------------------------------------------------------------
+               diagnosis           250             0             0             0             0             0
+             grounded_qa             0           250             0             0             0             0
+          implementation             0             0           250             0             0             0
+  information_extraction             0             0             0           250             0             0
+  rewriting_and_drafting             0             0             0             0           250             0
+            safe_refusal             0             0             0             0             0           250
