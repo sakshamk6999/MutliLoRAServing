@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package model_service;
+
+// ─── Load / Unload Adapter ──────────────────────────────────────────────────
+
+message LoadAdapterRequest {
+  string adapter_id   = 1;
+  string adapter_path = 2;
+  int32  rank         = 3;
+  float  alpha        = 4;
+}
+
+message LoadAdapterResponse {
+  string adapter_id = 1;
+  string status     = 2;  // "loaded" | "already_loaded" | "error"
+}
+
+message UnloadAdapterRequest {
+  string adapter_id = 1;
+}
+
+message UnloadAdapterResponse {
+  string adapter_id = 1;
+  string status     = 2;  // "unloaded" | "not_found"
+}
+
+// ─── Prefill (batch ingestion) ───────────────────────────────────────────────
+
+message PrefillRequest {
+  string          batch_id    = 1;
+  repeated string request_ids = 2;
+  repeated string prompts     = 3;
+  repeated int32  max_tokens  = 4;
+}
+
+message PrefillResponse {
+  string batch_id = 1;
+  string status   = 2;  // "accepted" | "error"
+  string message  = 3;
+}
+
+// ─── Decode (token generation step) ─────────────────────────────────────────
+
+message DecodeRequest {
+  string batch_id = 1;
+}
+
+message DecodeResponse {
+  string          batch_id        = 1;
+  repeated string request_ids     = 2;
+  repeated string generated_texts = 3;
+  repeated bool   is_finished     = 4;
+}
+
+// ─── Service Definition ──────────────────────────────────────────────────────
+
+service ModelService {
+  rpc LoadAdapter   (LoadAdapterRequest)   returns (LoadAdapterResponse);
+  rpc UnloadAdapter (UnloadAdapterRequest) returns (UnloadAdapterResponse);
+  rpc Prefill       (PrefillRequest)       returns (PrefillResponse);
+  rpc Decode        (DecodeRequest)        returns (DecodeResponse);
+}

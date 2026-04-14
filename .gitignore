@@ -1,3 +1,10 @@
 misc/**
 **/newEnv/**
 **.DS_Store**
+
+**.env**
+**/vllm/**
+**__pycache__**
+
+**cache**
+**classifier_model**
