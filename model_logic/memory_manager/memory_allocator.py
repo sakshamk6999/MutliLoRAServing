@@ -1,3 +1,11 @@
+# %%writefile memory_allocator.py
+# import gc
+# import torch
+
+# # TODO: will it slow down the program?
+# def suffix_cumsum(tensor, dim=-1, dtype=torch.int32):
+#     return torch.cumsum(tensor.flip(dim), dim, dtype=torch.int32).flip(dim)
+
 import gc
 import torch
 
