@@ -47,10 +47,10 @@ def router_thread(shared_queue: queue.Queue, client: ModelServiceClient):
             request_ids=[r.request_id for r in br.requests],
             prompts=[r.prompt for r in br.requests],
             max_tokens=[r.max_tokens for r in br.requests],
+            # Align LoRA ids with classifier task labels (LoadAdapter must use same ids).
+            adapter_ids=[r.task_type for r in br.requests],
         )
         print(f"[Router:batch] gRPC Prefill status={resp.status}")
-
-def execute_step(queue: queue):
 
 
 def main():

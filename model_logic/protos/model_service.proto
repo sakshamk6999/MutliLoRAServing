@@ -28,10 +28,11 @@ message UnloadAdapterResponse {
 // ─── Prefill (batch ingestion) ───────────────────────────────────────────────
 
 message PrefillRequest {
-  string          batch_id    = 1;
-  repeated string request_ids = 2;
-  repeated string prompts     = 3;
-  repeated int32  max_tokens  = 4;
+  string          batch_id      = 1;
+  repeated string request_ids   = 2;
+  repeated string prompts       = 3;
+  repeated int32  max_tokens    = 4;
+  repeated string adapter_ids   = 5;  // parallel to request_ids; which LoRA per row
 }
 
 message PrefillResponse {

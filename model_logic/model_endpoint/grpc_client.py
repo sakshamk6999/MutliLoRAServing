@@ -20,12 +20,20 @@ class ModelServiceClient:
         req = model_service_pb2.UnloadAdapterRequest(adapter_id=adapter_id)
         return self.stub.UnloadAdapter(req)
 
-    def prefill(self, batch_id: str, request_ids: list, prompts: list, max_tokens: list):
+    def prefill(
+        self,
+        batch_id: str,
+        request_ids: list,
+        prompts: list,
+        max_tokens: list,
+        adapter_ids: list,
+    ):
         req = model_service_pb2.PrefillRequest(
             batch_id=batch_id,
             request_ids=request_ids,
             prompts=prompts,
             max_tokens=max_tokens,
+            adapter_ids=adapter_ids,
         )
         return self.stub.Prefill(req)
 
