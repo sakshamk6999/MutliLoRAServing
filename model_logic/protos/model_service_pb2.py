@@ -9,44 +9,47 @@ from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import runtime_version as _runtime_version
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder
+
 _runtime_version.ValidateProtobufRuntimeVersion(
     _runtime_version.Domain.PUBLIC,
     6,
     31,
     1,
-    '',
-    'model_logic/protos/model_service.proto'
+    "",
+    "model_logic/protos/model_service.proto",
 )
 # @@protoc_insertion_point(imports)
 
 _sym_db = _symbol_database.Default()
 
 
-
-
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n&model_logic/protos/model_service.proto\x12\rmodel_service\"[\n\x12LoadAdapterRequest\x12\x12\n\nadapter_id\x18\x01 \x01(\t\x12\x14\n\x0c\x61\x64\x61pter_path\x18\x02 \x01(\t\x12\x0c\n\x04rank\x18\x03 \x01(\x05\x12\r\n\x05\x61lpha\x18\x04 \x01(\x02\"9\n\x13LoadAdapterResponse\x12\x12\n\nadapter_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\"*\n\x14UnloadAdapterRequest\x12\x12\n\nadapter_id\x18\x01 \x01(\t\";\n\x15UnloadAdapterResponse\x12\x12\n\nadapter_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\"q\n\x0ePrefillRequest\x12\x10\n\x08\x62\x61tch_id\x18\x01 \x01(\t\x12\x13\n\x0brequest_ids\x18\x02 \x03(\t\x12\x0f\n\x07prompts\x18\x03 \x03(\t\x12\x12\n\nmax_tokens\x18\x04 \x03(\x05\x12\x13\n\x0b\x61\x64\x61pter_ids\x18\x05 \x03(\t\"D\n\x0fPrefillResponse\x12\x10\n\x08\x62\x61tch_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\x12\x0f\n\x07message\x18\x03 \x01(\t\"!\n\rDecodeRequest\x12\x10\n\x08\x62\x61tch_id\x18\x01 \x01(\t\"e\n\x0e\x44\x65\x63odeResponse\x12\x10\n\x08\x62\x61tch_id\x18\x01 \x01(\t\x12\x13\n\x0brequest_ids\x18\x02 \x03(\t\x12\x17\n\x0fgenerated_texts\x18\x03 \x03(\t\x12\x13\n\x0bis_finished\x18\x04 \x03(\x08\x32\xd1\x02\n\x0cModelService\x12T\n\x0bLoadAdapter\x12!.model_service.LoadAdapterRequest\x1a\".model_service.LoadAdapterResponse\x12Z\n\rUnloadAdapter\x12#.model_service.UnloadAdapterRequest\x1a$.model_service.UnloadAdapterResponse\x12H\n\x07Prefill\x12\x1d.model_service.PrefillRequest\x1a\x1e.model_service.PrefillResponse\x12\x45\n\x06\x44\x65\x63ode\x12\x1c.model_service.DecodeRequest\x1a\x1d.model_service.DecodeResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
+    b'\n&model_logic/protos/model_service.proto\x12\rmodel_service"[\n\x12LoadAdapterRequest\x12\x12\n\nadapter_id\x18\x01 \x01(\t\x12\x14\n\x0c\x61\x64\x61pter_path\x18\x02 \x01(\t\x12\x0c\n\x04rank\x18\x03 \x01(\x05\x12\r\n\x05\x61lpha\x18\x04 \x01(\x02"9\n\x13LoadAdapterResponse\x12\x12\n\nadapter_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t"*\n\x14UnloadAdapterRequest\x12\x12\n\nadapter_id\x18\x01 \x01(\t";\n\x15UnloadAdapterResponse\x12\x12\n\nadapter_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t"q\n\x0ePrefillRequest\x12\x10\n\x08\x62\x61tch_id\x18\x01 \x01(\t\x12\x13\n\x0brequest_ids\x18\x02 \x03(\t\x12\x0f\n\x07prompts\x18\x03 \x03(\t\x12\x12\n\nmax_tokens\x18\x04 \x03(\x05\x12\x13\n\x0b\x61\x64\x61pter_ids\x18\x05 \x03(\t"D\n\x0fPrefillResponse\x12\x10\n\x08\x62\x61tch_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\x12\x0f\n\x07message\x18\x03 \x01(\t"!\n\rDecodeRequest\x12\x10\n\x08\x62\x61tch_id\x18\x01 \x01(\t"e\n\x0e\x44\x65\x63odeResponse\x12\x10\n\x08\x62\x61tch_id\x18\x01 \x01(\t\x12\x13\n\x0brequest_ids\x18\x02 \x03(\t\x12\x17\n\x0fgenerated_texts\x18\x03 \x03(\t\x12\x13\n\x0bis_finished\x18\x04 \x03(\x08\x32\xd1\x02\n\x0cModelService\x12T\n\x0bLoadAdapter\x12!.model_service.LoadAdapterRequest\x1a".model_service.LoadAdapterResponse\x12Z\n\rUnloadAdapter\x12#.model_service.UnloadAdapterRequest\x1a$.model_service.UnloadAdapterResponse\x12H\n\x07Prefill\x12\x1d.model_service.PrefillRequest\x1a\x1e.model_service.PrefillResponse\x12\x45\n\x06\x44\x65\x63ode\x12\x1c.model_service.DecodeRequest\x1a\x1d.model_service.DecodeResponseb\x06proto3'
+)
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
-_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'model_logic.protos.model_service_pb2', _globals)
+_builder.BuildTopDescriptorsAndMessages(
+    DESCRIPTOR, "model_logic.protos.model_service_pb2", _globals
+)
 if not _descriptor._USE_C_DESCRIPTORS:
-  DESCRIPTOR._loaded_options = None
-  _globals['_LOADADAPTERREQUEST']._serialized_start=57
-  _globals['_LOADADAPTERREQUEST']._serialized_end=148
-  _globals['_LOADADAPTERRESPONSE']._serialized_start=150
-  _globals['_LOADADAPTERRESPONSE']._serialized_end=207
-  _globals['_UNLOADADAPTERREQUEST']._serialized_start=209
-  _globals['_UNLOADADAPTERREQUEST']._serialized_end=251
-  _globals['_UNLOADADAPTERRESPONSE']._serialized_start=253
-  _globals['_UNLOADADAPTERRESPONSE']._serialized_end=312
-  _globals['_PREFILLREQUEST']._serialized_start=314
-  _globals['_PREFILLREQUEST']._serialized_end=427
-  _globals['_PREFILLRESPONSE']._serialized_start=429
-  _globals['_PREFILLRESPONSE']._serialized_end=497
-  _globals['_DECODEREQUEST']._serialized_start=499
-  _globals['_DECODEREQUEST']._serialized_end=532
-  _globals['_DECODERESPONSE']._serialized_start=534
-  _globals['_DECODERESPONSE']._serialized_end=635
-  _globals['_MODELSERVICE']._serialized_start=638
-  _globals['_MODELSERVICE']._serialized_end=975
+    DESCRIPTOR._loaded_options = None
+    _globals["_LOADADAPTERREQUEST"]._serialized_start = 57
+    _globals["_LOADADAPTERREQUEST"]._serialized_end = 148
+    _globals["_LOADADAPTERRESPONSE"]._serialized_start = 150
+    _globals["_LOADADAPTERRESPONSE"]._serialized_end = 207
+    _globals["_UNLOADADAPTERREQUEST"]._serialized_start = 209
+    _globals["_UNLOADADAPTERREQUEST"]._serialized_end = 251
+    _globals["_UNLOADADAPTERRESPONSE"]._serialized_start = 253
+    _globals["_UNLOADADAPTERRESPONSE"]._serialized_end = 312
+    _globals["_PREFILLREQUEST"]._serialized_start = 314
+    _globals["_PREFILLREQUEST"]._serialized_end = 427
+    _globals["_PREFILLRESPONSE"]._serialized_start = 429
+    _globals["_PREFILLRESPONSE"]._serialized_end = 497
+    _globals["_DECODEREQUEST"]._serialized_start = 499
+    _globals["_DECODEREQUEST"]._serialized_end = 532
+    _globals["_DECODERESPONSE"]._serialized_start = 534
+    _globals["_DECODERESPONSE"]._serialized_end = 635
+    _globals["_MODELSERVICE"]._serialized_start = 638
+    _globals["_MODELSERVICE"]._serialized_end = 975
 # @@protoc_insertion_point(module_scope)
