@@ -60,3 +60,54 @@ Instruction : Convert the note into compact JSON for a sales call recap. Use exa
 Reference   : {"owner": "owner_5", "priority": "low", "status": "new", "next_step": "prepare rollback note"}
 Prediction  : {"owner": "owner_26", "priority": "low", "status": "new", "next_step": "hand off to regional lead"}
 ROUGE-L=0.5455  EM=0
+
+
+Metric             Score
+-------------------------
+ROUGE-1           1.0000
+ROUGE-2           1.0000
+ROUGE-L           1.0000
+Exact Match       1.0000
+
+Total examples evaluated: 250
+
+── Sample predictions (first 3) ─────────────────────────────────────
+
+Instruction : Write a TypeScript solution for a backend task in partner invoices. Name the main utility `merge_partner_invoices_74`. T
+Reference   : ```ts
+type Row = Record<string, string | number | null>;
+
+export function merge_partner_invoices_74(rows: Row[]): Row[]
+Prediction  : ```ts
+type Row = Record<string, string | number | null>;
+
+export function merge_partner_invoices_74(rows: Row[]): Row[]
+ROUGE-L=1.0000  EM=1
+
+Instruction : Write a Python solution for a backend task in shipment events. Name the main utility `merge_shipment_events_2658`. The u
+Reference   : ```python
+from __future__ import annotations
+
+def merge_shipment_events_2658(rows: list[dict]) -> list[dict]:
+    """Pro
+Prediction  : ```python
+from __future__ import annotations
+
+def merge_shipment_events_2658(rows: list[dict]) -> list[dict]:
+    """Pro
+ROUGE-L=1.0000  EM=1
+
+Instruction : Write a SQL solution for a backend task in partner invoices. Name the main utility `validate_partner_invoices_3004`. The
+Reference   : ```sql
+WITH normalized AS (
+  SELECT
+    LOWER(TRIM(record_id)) AS record_id,
+    LOWER(TRIM(status)) AS status,
+    upd
+Prediction  : ```sql
+WITH normalized AS (
+  SELECT
+    LOWER(TRIM(record_id)) AS record_id,
+    LOWER(TRIM(status)) AS status,
+    upd
+ROUGE-L=1.0000  EM=1
