@@ -21,7 +21,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from model_logic.protos import model_service_pb2
 
-from .metrics import ServingMetrics
+from ..metrics import ServingMetrics
 
 DEFAULT_BASE_MODEL = "{{BASE_MODEL_ID_OR_PATH}}"
 

@@ -14,6 +14,7 @@ from .servicer import DelegatingModelServicer
 class BackendKind(str, Enum):
     STUB = "stub"
     CAUSAL_LM_PEFT = "causal_lm_peft"
+    VLLM = "vllm"
 
 
 def create_model_servicer(
@@ -34,6 +35,13 @@ def create_model_servicer(
                 "CAUSAL_LM_PEFT requires base_model_id=... or BASE_MODEL_ID env"
             )
         backend = CausalLMPEFTBackend(base_model_id=mid)
+    elif kind == BackendKind.VLLM:
+        from .backends.vLLM import VLLMBackend
+
+        mid = base_model_id or os.environ.get("BASE_MODEL_ID")
+        if not mid:
+            raise ValueError("vllm requires base_model_id=... or BASE_MODEL_ID env")
+        backend = VLLMBackend(base_model_id=mid)
     else:
         raise ValueError(f"Unknown backend: {kind}")
     return DelegatingModelServicer(backend)

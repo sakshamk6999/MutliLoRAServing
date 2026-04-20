@@ -35,5 +35,5 @@ The backend uses a **single** device string (`cuda` / `cpu`) and `.to(device)` â
 ## Related files
 
 - Implementation: `causal_lm_backend.py`
-- Metrics: `metrics.py`
+- Metrics (shared with other backends): `../metrics.py`
 - Proto: `model_logic/protos/model_service.proto`

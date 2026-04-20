@@ -1,18 +1,23 @@
 """
 Serving metrics: throughput, end-to-end latency, first-token latency (TTFT).
 
+Shared by gRPC model backends (e.g. PEFT causal LM, vLLM).
+
 Adapter loading (vs naive get_peft_model + LoraConfig only)
 ------------------------------------------------------------
-``get_peft_model(base, LoraConfig(r=rank))`` **creates a new LoRA structure** with
-**random (untrained) weights** unless you load checkpoints yourself. Parsing
-``rank`` from a path only fixes the **architecture**, not task-specific weights.
+``get_peft_model(base, LoraConfig(r=rank))`` **creates a new LoRA structure**
+with **random (untrained) weights** unless you load checkpoints yourself.
+Parsing ``rank`` from a path only fixes the **architecture**, not task-specific
+weights.
 
-``PeftModel.from_pretrained(base, adapter_path, ...)`` / ``load_adapter(path)``
-loads **trained** tensors from disk; behavior matches the adapter that was saved.
+``PeftModel.from_pretrained(base, adapter_path, ...)`` /
+``load_adapter(path)`` loads **trained** tensors from disk; behavior matches the
+adapter that was saved.
 
-Those are **not** interchangeable: one is a random init / shape check, the other is
-real fine-tuned weights. For serving, always use **from_pretrained / load_adapter**
-with paths produced by training (as in this backend).
+Those are **not** interchangeable: one is a random init / shape check, the
+other is real fine-tuned weights. For serving, always use
+**from_pretrained / load_adapter** with paths produced by training (as in the
+PEFT backend).
 """
 
 from __future__ import annotations
