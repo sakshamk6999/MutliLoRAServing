@@ -50,6 +50,18 @@ def pytest_addoption(parser):
         default=128,
         help="Max new tokens per generation request (default 128).",
     )
+    parser.addoption(
+        "--batch-size",
+        type=int,
+        default=4,
+        help="Number of requests per Prefill batch in benchmark tests (default 4).",
+    )
+    parser.addoption(
+        "--num-runs",
+        type=int,
+        default=3,
+        help="Number of benchmark repetitions to average over (default 3).",
+    )
 
 
 def pytest_configure(config):
