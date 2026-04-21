@@ -436,6 +436,22 @@ def running_services(cli):
     yield
 
 
+# ── Metrics collection ─────────────────────────────────────────────────────────
+
+from dataclasses import dataclass as _dc, field as _field
+import statistics as _stats
+
+@_dc
+class _Record:
+    test: str
+    adapter: str
+    ttft_s: float    # router: prefill-accepted → first decode with text
+    e2e_s: float     # router: prefill-accepted → all tokens done
+    tokens: int      # approximate word count of generated text
+
+_records: list[_Record] = []
+
+
 # ── Helpers for tests ──────────────────────────────────────────────────────────
 
 BASE_URL = f"http://127.0.0.1:{HTTP_PORT}"
@@ -467,6 +483,20 @@ def _poll(request_id: str) -> dict:
     pytest.fail(f"No result for {request_id} after {GENERATION_TIMEOUT}s")
 
 
+def _record(test: str, adapter: str, result: dict):
+    """Store one timing record and print a one-line summary."""
+    r = _Record(
+        test=test,
+        adapter=adapter,
+        ttft_s=result.get("ttft_s", 0.0),
+        e2e_s=result.get("e2e_s", 0.0),
+        tokens=len(result.get("generated_text", "").split()),
+    )
+    _records.append(r)
+    print(f"\n  [metrics] ttft={r.ttft_s:.3f}s  e2e={r.e2e_s:.3f}s  "
+          f"tokens≈{r.tokens}  finish={result.get('finish_reason')}")
+
+
 # ── Tests ──────────────────────────────────────────────────────────────────────
 
 @pytest.mark.real_world
@@ -488,8 +518,7 @@ def test_prompt_generates_text(running_services, cli,
     print(f"\n  [queued] {request_id[:8]}… adapter={adapter_name}")
 
     result = _poll(request_id)
-
-    print(f"  [result] finish={result['finish_reason']}")
+    _record("prompt_generates_text", adapter_name, result)
     print(f"  [text]   {result['generated_text'][:200]}")
 
     assert result["request_id"] == request_id
@@ -511,7 +540,7 @@ def test_base_model_no_adapter(running_services, cli):
     prompt = "What is the capital of France?"
     request_id = _queue_prompt(prompt, cli["max_tokens"])
     result = _poll(request_id)
-
+    _record("base_model_no_adapter", "base", result)
     assert len(result["generated_text"]) > 0
     print(f"\n  [base]   {result['generated_text'][:200]}")
 
@@ -525,12 +554,19 @@ def test_sequential_prompts_all_return(running_services, cli):
     if not prompts:
         pytest.skip("No matching adapters provided")
 
+    t_wall_start = time.monotonic()
     ids = [_queue_prompt(p, cli["max_tokens"]) for p in prompts]
     results = [_poll(rid) for rid in ids]
+    wall_s = time.monotonic() - t_wall_start
+    throughput = len(prompts) / wall_s
 
     for rid, res in zip(ids, results):
         assert res["request_id"] == rid
         assert len(res["generated_text"]) > 0
+        _record("sequential_prompts", res.get("adapter", "unknown"), res)
+
+    print(f"\n  [throughput] {len(prompts)} requests in {wall_s:.2f}s "
+          f"= {throughput:.3f} req/s")
 
 
 @pytest.mark.real_world
@@ -550,15 +586,46 @@ def test_adapter_outputs_differ_from_base(running_services, cli):
     # Route to adapter
     rid_adapted = _queue_prompt(prompt_suite_entry, cli["max_tokens"])
     res_adapted = _poll(rid_adapted)
+    _record("adapter_vs_base", adapter, res_adapted)
 
     # Force base model by sending an unclassifiable prompt
     rid_base = _queue_prompt("zxqwerty1234567890", cli["max_tokens"])
     res_base = _poll(rid_base)
+    _record("adapter_vs_base", "base", res_base)
 
     print(f"\n  [adapter] {res_adapted['generated_text'][:120]}")
     print(f"  [base]    {res_base['generated_text'][:120]}")
 
-    # Both must return something — but we can't assert they differ since the base
-    # model may have similar priors.  Just verify both completed successfully.
     assert len(res_adapted["generated_text"]) > 0
     assert res_base["finish_reason"] in ("stop", "length", "error: ")
+
+
+@pytest.mark.real_world
+def test_metrics_summary(running_services, cli):  # noqa: ARG001
+    """Print aggregated TTFT / E2E / throughput across all completed tests."""
+    if not _records:
+        pytest.skip("No metrics collected yet")
+
+    sep = "─" * 80
+    print(f"\n{sep}")
+    print(f"  {'REAL-WORLD TEST METRICS':^76}")
+    print(f"  backend={cli['backend']}  "
+          f"max_tokens={cli['max_tokens']}  "
+          f"num_adapters={cli['num_adapters'] or 'all'}")
+    print(sep)
+    print(f"  {'Test / Adapter':<38} {'TTFT (s)':>9} {'E2E (s)':>9} {'Tokens':>7}")
+    print(sep)
+    for r in _records:
+        label = f"{r.test[:22]}/{r.adapter[:14]}"
+        print(f"  {label:<38} {r.ttft_s:>9.3f} {r.e2e_s:>9.3f} {r.tokens:>7}")
+    print(sep)
+
+    ttfts = [r.ttft_s for r in _records if r.ttft_s > 0]
+    e2es  = [r.e2e_s  for r in _records if r.e2e_s  > 0]
+    if ttfts:
+        print(f"  {'mean TTFT':<38} {_stats.mean(ttfts):>9.3f}")
+        print(f"  {'p50  TTFT':<38} {_stats.median(ttfts):>9.3f}")
+        print(f"  {'mean E2E':<38} {'':>9} {_stats.mean(e2es):>9.3f}")
+        tput = len(_records) / sum(e2es) if e2es else 0.0
+        print(f"  {'throughput (req/s, sequential)':<38} {tput:>9.3f}")
+    print(sep + "\n")

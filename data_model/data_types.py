@@ -28,4 +28,6 @@ class ModelResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
     request_id: str
     generated_text: str
-    finish_reason: str  # "stop" | "length"
+    finish_reason: str   # "stop" | "length"
+    ttft_s: float = 0.0  # router: prefill-accepted → first token in Decode response
+    e2e_s: float = 0.0   # router: prefill-accepted → all tokens done

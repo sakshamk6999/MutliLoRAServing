@@ -90,6 +90,11 @@ class BatchTracker:
     finished: list[bool] = field(default_factory=list)
     tokens_generated: list[int] = field(default_factory=list)
 
+    # Timing — set by the scheduler, used in _deliver_results
+    t_prefill: float = 0.0          # wall time when Prefill RPC returned "accepted"
+    t_first_token: float = 0.0      # wall time when first Decode response had text
+    t_done: float = 0.0             # wall time when all requests in batch finished
+
     def __post_init__(self):
         n = len(self.request_ids)
         if not self.generated_texts:
@@ -149,13 +154,18 @@ def scheduler_thread(pending: queue.Queue,
                 continue
 
             # Update tracker from gRPC response
+            now = time.monotonic()
             for i, (text, done) in enumerate(zip(resp.generated_texts, resp.is_finished)):
                 tracker.generated_texts[i] = text
                 if not tracker.finished[i] and done:
                     tracker.tokens_generated[i] += 1
                 tracker.finished[i] = done
+            # Record first-token time on the decode step that first returns any text
+            if tracker.t_first_token == 0.0 and any(resp.generated_texts):
+                tracker.t_first_token = now
 
             if tracker.all_done:
+                tracker.t_done = now
                 finished_batches.append(batch_id)
 
         # Deliver results and remove completed batches
@@ -240,6 +250,7 @@ def _prefill_batch(reqs: list[TaggedRequest],
         request_ids=[r.request_id for r in reqs],
         adapter_ids=[r.task_type for r in reqs],
         max_tokens=[r.max_tokens for r in reqs],
+        t_prefill=time.monotonic(),
     )
     active[batch_id] = tracker
     print(f"[Router:sched] admitted batch={batch_id} "
@@ -248,19 +259,23 @@ def _prefill_batch(reqs: list[TaggedRequest],
 
 def _deliver_results(tracker: BatchTracker, result_sock: zmq.Socket):
     """Push one ModelResponse per completed request onto the result socket."""
+    ttft_s = (tracker.t_first_token - tracker.t_prefill) if tracker.t_first_token else 0.0
+    e2e_s  = (tracker.t_done       - tracker.t_prefill) if tracker.t_done        else 0.0
+
     for req_id, text, n_gen, max_tok in zip(
             tracker.request_ids, tracker.generated_texts,
             tracker.tokens_generated, tracker.max_tokens):
-        # Infer reason: if we stopped before hitting the limit → EOS ("stop")
         finish_reason = "length" if n_gen >= max_tok else "stop"
         response = ModelResponse(
             request_id=req_id,
             generated_text=text,
             finish_reason=finish_reason,
+            ttft_s=round(ttft_s, 4),
+            e2e_s=round(e2e_s, 4),
         )
         result_sock.send_json(response.model_dump())
         print(f"[Router:sched] delivered {req_id} "
-              f"finish={finish_reason} tokens={n_gen}")
+              f"finish={finish_reason} ttft={ttft_s:.3f}s e2e={e2e_s:.3f}s")
 
 
 def _deliver_errors(tracker: BatchTracker, result_sock: zmq.Socket, error: str):
