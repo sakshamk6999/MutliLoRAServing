@@ -48,9 +48,14 @@ class Qwen3PostLayerInfer:
 
     def token_forward(self, hidden_states: torch.Tensor, infer_state,
                       weight, return_logics: bool = False) -> torch.Tensor:
-        # Pick the last token of each request
-        last_idx = infer_state.b_start_loc + infer_state.b_seq_len - 1
-        last_hidden = hidden_states[last_idx]  # [batch_size, hidden_size]
+        if infer_state.is_prefill:
+            # Packed prefill: hidden_states is [total_token_num, H].
+            # Select the last token of each request.
+            last_idx = infer_state.b_start_loc + infer_state.b_seq_len - 1
+            last_hidden = hidden_states[last_idx]  # [batch_size, H]
+        else:
+            # Decode: hidden_states is already [batch_size, H] — one row per request.
+            last_hidden = hidden_states
         normed = _rms_norm(last_hidden, weight.final_norm_weight)
         logits = F.linear(normed, weight.lm_head_weight)
         return logits
