@@ -79,14 +79,16 @@ class BaseModel:
     
     def _init_mem_manager(self):
         assert self.config["num_attention_heads"] % self.world_size_ == 0
+        # KV cache stores K and V, which use num_key_value_heads (GQA), not num_attention_heads
+        kv_heads = self.config.get("num_key_value_heads", self.config["num_attention_heads"])
         self.mem_manager = MemoryAllocator(
                             tot_size=self.max_total_token_num + self.mem_adapter_size,
-                            cache_size=self.max_total_token_num, 
+                            cache_size=self.max_total_token_num,
                             dtype=torch.float16,
-                            head_num=self.config["num_attention_heads"] // self.world_size_,
+                            head_num=kv_heads // self.world_size_,
                             head_dim=self.config["n_embed"] // self.config["num_attention_heads"],
                             layer_num=self.config["n_layer"])
-        return 
+        return
     
     def _init_infer_layer(self):
         self.pre_infer = self.pre_layer_infer_class(tp_rank=self.tp_rank_, world_size=self.world_size_, network_config=self.config, mode=self.mode)
@@ -103,7 +105,8 @@ class BaseModel:
     
     def _init_some_value(self):
         self.head_dim_ = self.config["n_embed"] // self.config["num_attention_heads"]
-        self.tp_k_head_num_ = self.config["num_attention_heads"] // self.world_size_
+        kv_heads = self.config.get("num_key_value_heads", self.config["num_attention_heads"])
+        self.tp_k_head_num_ = kv_heads // self.world_size_
         self.tp_v_head_num_ = self.tp_k_head_num_
         self.layers_num = self.config["n_layer"]
         self.vocab_size = self.config["vocab_size"]
