@@ -16,12 +16,54 @@ import queue
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 
 import zmq
 
 from data_model.data_types import TaggedRequest, ModelResponse
 from model_logic.model_endpoint.grpc_client import ModelServiceClient
+
+
+# ── LRU adapter cache ──────────────────────────────────────────────────────────
+
+class AdapterCache:
+    """Keeps at most `max_loaded` adapters resident in the model server.
+
+    Before each prefill, call ensure_loaded() with the adapter IDs in that
+    batch.  If a required adapter is not loaded and the cache is full, the
+    least-recently-used adapter is evicted first via UnloadAdapter RPC, then
+    the new adapter is fetched via LoadAdapter RPC.
+
+    Pass max_loaded=None to disable eviction (load everything, never evict).
+    """
+
+    def __init__(self, client: ModelServiceClient,
+                 adapter_dirs: dict[str, str],
+                 max_loaded: int | None = None):
+        self.client = client
+        self.adapter_dirs = adapter_dirs          # all known: name → path
+        self.max_loaded = max_loaded or len(adapter_dirs)
+        self._loaded: OrderedDict[str, None] = OrderedDict()  # end = MRU
+
+    def ensure_loaded(self, adapter_ids: list[str]):
+        """Load any missing adapters, evicting LRU entries if at capacity."""
+        for aid in dict.fromkeys(adapter_ids):    # unique, preserve order
+            if not aid or aid not in self.adapter_dirs:
+                continue                           # unknown adapter / base model
+            if aid in self._loaded:
+                self._loaded.move_to_end(aid)     # mark as recently used
+                continue
+            if len(self._loaded) >= self.max_loaded:
+                lru_id, _ = self._loaded.popitem(last=False)
+                self.client.unload_adapter(lru_id)
+                print(f"[AdapterCache] evicted {lru_id!r} "
+                      f"(max={self.max_loaded})")
+            self.client.load_adapter(
+                adapter_id=aid, adapter_path=self.adapter_dirs[aid])
+            self._loaded[aid] = None
+            print(f"[AdapterCache] loaded {aid!r} "
+                  f"({len(self._loaded)}/{self.max_loaded} slots used)")
 
 # ── Addresses ──────────────────────────────────────────────────────────────────
 MLP_PULL_ADDR    = "tcp://localhost:5556"   # receive tagged requests
@@ -83,7 +125,8 @@ def receiver_thread(zmq_ctx: zmq.Context, pending: queue.Queue):
 
 def scheduler_thread(pending: queue.Queue,
                      client: ModelServiceClient,
-                     zmq_ctx: zmq.Context):
+                     zmq_ctx: zmq.Context,
+                     adapter_cache: AdapterCache | None = None):
     result_sock = zmq_ctx.socket(zmq.PUSH)
     result_sock.bind(RESULT_PUSH_ADDR)
     print(f"[Router:sched] result socket bound to {RESULT_PUSH_ADDR}")
@@ -133,7 +176,8 @@ def scheduler_thread(pending: queue.Queue,
                               timeout=ADMIT_TIMEOUT if not active else 0)
 
             if new_reqs:
-                _prefill_batch(new_reqs, client, active, result_sock)
+                _prefill_batch(new_reqs, client, active, result_sock,
+                               adapter_cache)
 
         # ── STEP 3: IDLE ──────────────────────────────────────────────────────
         if not active and pending.empty():
@@ -160,8 +204,18 @@ def _drain(pending: queue.Queue, limit: int, timeout: float) -> list[TaggedReque
 def _prefill_batch(reqs: list[TaggedRequest],
                    client: ModelServiceClient,
                    active: dict[str, BatchTracker],
-                   result_sock: "zmq.Socket"):
+                   result_sock: "zmq.Socket",
+                   adapter_cache: AdapterCache | None = None):
     """Prefill a list of requests and register the resulting batch as active."""
+    # Ensure every adapter needed by this batch is loaded, evicting LRU if needed
+    if adapter_cache is not None:
+        try:
+            adapter_cache.ensure_loaded([r.task_type for r in reqs])
+        except Exception as e:
+            print(f"[Router:sched] AdapterCache error: {e}")
+            _deliver_errors_for_reqs(reqs, result_sock, str(e))
+            return
+
     batch_id = str(uuid.uuid4())
     try:
         resp = client.prefill(

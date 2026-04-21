@@ -68,6 +68,12 @@ def pytest_addoption(parser):
         choices=["ours", "peft", "vllm"],
         help="Which serving backend to test: ours | peft | vllm (default: ours).",
     )
+    parser.addoption(
+        "--num-adapters",
+        type=int,
+        default=None,
+        help="Max number of adapters to load (default: all provided via --adapter).",
+    )
 
 
 def pytest_configure(config):

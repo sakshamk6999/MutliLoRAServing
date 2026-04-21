@@ -320,6 +320,7 @@ def cli(request):
     classifier    = request.config.getoption("--classifier")
     max_tokens    = request.config.getoption("--max-tokens")
     backend       = request.config.getoption("--backend")
+    num_adapters  = request.config.getoption("--num-adapters")
 
     if not base_model_id:
         pytest.skip("--base-model-id not provided; skipping real-world tests")
@@ -337,10 +338,14 @@ def cli(request):
         except ImportError:
             pytest.skip("vllm not installed; skipping vllm backend tests")
 
+    if num_adapters is not None and num_adapters < 1:
+        pytest.fail(f"--num-adapters must be ≥ 1, got {num_adapters}")
+
     adapters = _parse_adapters(adapter_raw)
     return {
         "base_model_id": base_model_id,
-        "adapters": adapters,
+        "adapters": adapters,          # ALL provided adapters — cache handles eviction
+        "num_adapters": num_adapters,  # max concurrent; None = no limit
         "classifier": classifier,
         "max_tokens": max_tokens,
         "backend": backend,
@@ -365,11 +370,12 @@ def running_services(cli):
 
     zmq_ctx = zmq.Context()
 
-    # 1. gRPC backend server
+    # 1. gRPC backend server — start with NO pre-loaded adapters;
+    #    the AdapterCache below handles all loading/eviction on demand.
     grpc_ready = threading.Event()
     if backend == "ours":
         target, args = _start_grpc_ours, (
-            cli["base_model_id"], cli["adapters"], 8192, grpc_ready)
+            cli["base_model_id"], {}, 8192, grpc_ready)
     elif backend == "peft":
         target, args = _start_grpc_peft, (cli["base_model_id"], grpc_ready)
     else:  # vllm
@@ -380,10 +386,6 @@ def running_services(cli):
     print(f"[fixture] waiting up to {MODEL_LOAD_TIMEOUT}s for {backend!r} to load…")
     assert grpc_ready.wait(MODEL_LOAD_TIMEOUT), \
         f"{backend!r} gRPC server did not become ready within {MODEL_LOAD_TIMEOUT}s"
-
-    # peft / vllm don't pre-load adapters at startup — load via RPC now
-    if backend in ("peft", "vllm"):
-        _load_adapters_via_grpc(cli["adapters"])
 
     # 2. MLP (real classifier or keyword stub)
     mlp_ready = threading.Event()
@@ -401,16 +403,27 @@ def running_services(cli):
         ).start()
     assert mlp_ready.wait(SERVICE_READY_TIMEOUT), "MLP service did not become ready"
 
-    # 3. Router
+    # 3. Router + AdapterCache
     from model_logic.model_endpoint.grpc_client import ModelServiceClient
+    from router.router_service import AdapterCache
     pending: queue.Queue[TaggedRequest] = queue.Queue()
     client = ModelServiceClient(rrs.GRPC_TARGET)
+
+    adapter_cache = AdapterCache(
+        client=client,
+        adapter_dirs=cli["adapters"],
+        max_loaded=cli["num_adapters"],   # None = load all, never evict
+    )
+    if cli["num_adapters"] is not None:
+        print(f"[fixture] AdapterCache: max {cli['num_adapters']} adapter(s) "
+              f"resident at once across {len(cli['adapters'])} known adapters")
+
     threading.Thread(
         target=rrs.receiver_thread, args=(zmq_ctx, pending),
         daemon=True, name="router-recv",
     ).start()
     threading.Thread(
-        target=rrs.scheduler_thread, args=(pending, client, zmq_ctx),
+        target=rrs.scheduler_thread, args=(pending, client, zmq_ctx, adapter_cache),
         daemon=True, name="router-sched",
     ).start()
 
@@ -469,7 +482,7 @@ def test_prompt_generates_text(running_services, cli,
                                 adapter_name, prompt, expected_substr):
     """Each prompt is routed to its adapter and returns non-empty generated text."""
     if adapter_name not in cli["adapters"]:
-        pytest.skip(f"adapter {adapter_name!r} not provided via --adapter")
+        pytest.skip(f"adapter {adapter_name!r} path not provided via --adapter")
 
     request_id = _queue_prompt(prompt, cli["max_tokens"])
     print(f"\n  [queued] {request_id[:8]}… adapter={adapter_name}")
