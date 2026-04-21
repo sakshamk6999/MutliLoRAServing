@@ -46,24 +46,42 @@ class AdapterCache:
         self.max_loaded = max_loaded or len(adapter_dirs)
         self._loaded: OrderedDict[str, None] = OrderedDict()  # end = MRU
 
-    def ensure_loaded(self, adapter_ids: list[str]):
-        """Load any missing adapters, evicting LRU entries if at capacity."""
+    def ensure_loaded(self, adapter_ids: list[str],
+                      pinned: set[str] | None = None) -> bool:
+        """Load any missing adapters, evicting LRU entries that are not pinned.
+
+        pinned: adapter IDs currently being decoded — must not be evicted.
+        Returns False if a needed adapter cannot be loaded because every loaded
+        adapter is pinned (caller should defer the request).
+        """
+        pinned = pinned or set()
         for aid in dict.fromkeys(adapter_ids):    # unique, preserve order
             if not aid or aid not in self.adapter_dirs:
-                continue                           # unknown adapter / base model
+                continue                           # unknown / base model
             if aid in self._loaded:
                 self._loaded.move_to_end(aid)     # mark as recently used
                 continue
+            # Need a slot — evict the LRU entry that is not pinned
             if len(self._loaded) >= self.max_loaded:
-                lru_id, _ = self._loaded.popitem(last=False)
-                self.client.unload_adapter(lru_id)
-                print(f"[AdapterCache] evicted {lru_id!r} "
-                      f"(max={self.max_loaded})")
+                evicted = False
+                for lru_id in list(self._loaded.keys()):  # front = LRU
+                    if lru_id not in pinned:
+                        del self._loaded[lru_id]
+                        self.client.unload_adapter(lru_id)
+                        print(f"[AdapterCache] evicted {lru_id!r} "
+                              f"(max={self.max_loaded})")
+                        evicted = True
+                        break
+                if not evicted:
+                    print(f"[AdapterCache] all {self.max_loaded} slot(s) pinned "
+                          f"by active batches — deferring load of {aid!r}")
+                    return False
             self.client.load_adapter(
                 adapter_id=aid, adapter_path=self.adapter_dirs[aid])
             self._loaded[aid] = None
             print(f"[AdapterCache] loaded {aid!r} "
                   f"({len(self._loaded)}/{self.max_loaded} slots used)")
+        return True
 
 # ── Addresses ──────────────────────────────────────────────────────────────────
 MLP_PULL_ADDR    = "tcp://localhost:5556"   # receive tagged requests
@@ -186,8 +204,23 @@ def scheduler_thread(pending: queue.Queue,
                               timeout=ADMIT_TIMEOUT if not active else 0)
 
             if new_reqs:
-                _prefill_batch(new_reqs, client, active, result_sock,
-                               adapter_cache)
+                # Adapters currently being decoded must not be evicted
+                pinned = {aid
+                          for t in active.values()
+                          for aid in t.adapter_ids}
+
+                if adapter_cache is not None:
+                    can_admit = adapter_cache.ensure_loaded(
+                        [r.task_type for r in new_reqs], pinned=pinned)
+                    if not can_admit:
+                        # All cache slots occupied by active decode batches;
+                        # put requests back and wait for a batch to finish.
+                        for req in new_reqs:
+                            pending.put(req)
+                        new_reqs = []
+
+                if new_reqs:
+                    _prefill_batch(new_reqs, client, active, result_sock)
 
         # ── STEP 3: IDLE ──────────────────────────────────────────────────────
         if not active and pending.empty():
@@ -214,18 +247,8 @@ def _drain(pending: queue.Queue, limit: int, timeout: float) -> list[TaggedReque
 def _prefill_batch(reqs: list[TaggedRequest],
                    client: ModelServiceClient,
                    active: dict[str, BatchTracker],
-                   result_sock: "zmq.Socket",
-                   adapter_cache: AdapterCache | None = None):
+                   result_sock: "zmq.Socket"):
     """Prefill a list of requests and register the resulting batch as active."""
-    # Ensure every adapter needed by this batch is loaded, evicting LRU if needed
-    if adapter_cache is not None:
-        try:
-            adapter_cache.ensure_loaded([r.task_type for r in reqs])
-        except Exception as e:
-            print(f"[Router:sched] AdapterCache error: {e}")
-            _deliver_errors_for_reqs(reqs, result_sock, str(e))
-            return
-
     batch_id = str(uuid.uuid4())
     try:
         resp = client.prefill(
