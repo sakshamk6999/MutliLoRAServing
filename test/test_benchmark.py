@@ -294,14 +294,13 @@ def vllm_client(cli):
     try:
         import vllm  # noqa: F401
     except ImportError:
-        pytest.skip("vllm not installed")
+        return None  # vllm unavailable — tests will skip this backend silently
     ready = threading.Event()
-    t = threading.Thread(
+    threading.Thread(
         target=_start_vllm,
         args=(cli["base_model_id"], ready),
         daemon=True, name="backend-vllm",
-    )
-    t.start()
+    ).start()
     assert ready.wait(MODEL_LOAD_TIMEOUT), "vllm backend timed out"
     client = ModelServiceClient(f"localhost:{PORTS['vllm']}")
     _load_adapters_via_grpc(client, cli["adapters"])
@@ -399,35 +398,57 @@ def _print_table(results: list[ScenarioResult]):
     for r in results:
         by_scenario.setdefault(r.scenario, {})[r.backend] = r
 
-    print(f"\n{'Speedup (ours vs baselines)':^100}")
-    print(sep)
-    print(f"{'Scenario':<28} {'ours TTFT vs peft':>20} {'ours TTFT vs vllm':>20} "
-          f"{'ours tput vs peft':>20} {'ours tput vs vllm':>20}")
-    print(sep)
-    for scenario, by_be in by_scenario.items():
-        ours = by_be.get("ours")
-        peft = by_be.get("peft")
-        vllm = by_be.get("vllm")
-        if ours is None:
-            continue
-        def _ratio(base, candidate, higher_better=False):
-            if base is None:
+    # Collect which baselines are actually present
+    present_baselines = sorted({
+        r.backend for r in results if r.backend != "ours"
+    })
+
+    if present_baselines:
+        print(f"\n{'Speedup  (ours vs baselines)':^100}")
+        print(sep)
+        header = f"{'Scenario':<28}"
+        for bl in present_baselines:
+            header += f"  {'TTFT vs ' + bl:>18}  {'tput vs ' + bl:>18}"
+        print(header)
+        print(sep)
+
+        def _ratio(base_val, cand_val, higher_better=False):
+            if base_val is None or cand_val is None:
                 return "n/a"
-            v = (base / candidate) if not higher_better else (candidate / base)
+            v = (base_val / cand_val) if not higher_better else (cand_val / base_val)
             return f"{v:.2f}x"
-        print(
-            f"{scenario:<28} "
-            f"{_ratio(peft.mean_ttft_s if peft else None, ours.mean_ttft_s):>20} "
-            f"{_ratio(vllm.mean_ttft_s if vllm else None, ours.mean_ttft_s):>20} "
-            f"{_ratio(ours.mean_throughput_rps, peft.mean_throughput_rps if peft else None, True):>20} "
-            f"{_ratio(ours.mean_throughput_rps, vllm.mean_throughput_rps if vllm else None, True):>20}"
-        )
-    print(sep + "\n")
+
+        for scenario, by_be in by_scenario.items():
+            ours = by_be.get("ours")
+            if ours is None:
+                continue
+            row = f"{scenario:<28}"
+            for bl in present_baselines:
+                bl_res = by_be.get(bl)
+                row += (
+                    f"  {_ratio(bl_res.mean_ttft_s if bl_res else None, ours.mean_ttft_s):>18}"
+                    f"  {_ratio(ours.mean_throughput_rps, bl_res.mean_throughput_rps if bl_res else None, True):>18}"
+                )
+            print(row)
+        print(sep + "\n")
 
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 
 all_results: list[ScenarioResult] = []
+
+
+def _active_backends(ours_client, peft_client, vllm_client):
+    """Return only the backends whose clients are available (not None)."""
+    return [
+        (name, client)
+        for name, client in [
+            ("ours", ours_client),
+            ("peft", peft_client),
+            ("vllm", vllm_client),
+        ]
+        if client is not None
+    ]
 
 
 @pytest.mark.real_world
@@ -437,15 +458,11 @@ def test_single_request(ours_client, peft_client, vllm_client, cli):
     prompt = next(p for n, p, _ in [
         ("diagnosis", "Patient presents with high fever. Possible diagnosis?", None),
         ("implementation", "Write a Python hello-world function.", None),
-    ] if n == adapter_name or True)  # any first match
+    ] if n == adapter_name or True)
 
     pairs = [(prompt, adapter_name)]
 
-    for backend_name, client in [
-        ("ours", ours_client),
-        ("peft", peft_client),
-        ("vllm", vllm_client),
-    ]:
+    for backend_name, client in _active_backends(ours_client, peft_client, vllm_client):
         r = _bench_scenario(
             client, backend_name, "single_request",
             pairs, cli["max_tokens"], cli["num_runs"])
@@ -455,7 +472,7 @@ def test_single_request(ours_client, peft_client, vllm_client, cli):
               f"latency={r.mean_total_s:.3f}s  "
               f"throughput={r.mean_throughput_rps:.3f} req/s")
 
-    assert True  # metric collection test — never fails on values
+    assert True
 
 
 @pytest.mark.real_world
@@ -463,11 +480,7 @@ def test_batch_same_adapter(ours_client, peft_client, vllm_client, cli):
     """Batch of N requests, all same adapter."""
     pairs = _pick_prompts(cli["adapters"], cli["batch_size"], mixed=False)
 
-    for backend_name, client in [
-        ("ours", ours_client),
-        ("peft", peft_client),
-        ("vllm", vllm_client),
-    ]:
+    for backend_name, client in _active_backends(ours_client, peft_client, vllm_client):
         r = _bench_scenario(
             client, backend_name, "batch_same_adapter",
             pairs, cli["max_tokens"], cli["num_runs"])
@@ -492,11 +505,7 @@ def test_batch_mixed_adapters(ours_client, peft_client, vllm_client, cli):
 
     pairs = _pick_prompts(cli["adapters"], cli["batch_size"], mixed=True)
 
-    for backend_name, client in [
-        ("ours", ours_client),
-        ("peft", peft_client),
-        ("vllm", vllm_client),
-    ]:
+    for backend_name, client in _active_backends(ours_client, peft_client, vllm_client):
         r = _bench_scenario(
             client, backend_name, "batch_mixed_adapters",
             pairs, cli["max_tokens"], cli["num_runs"])
