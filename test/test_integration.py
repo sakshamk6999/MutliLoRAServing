@@ -154,7 +154,9 @@ def _start_grpc_server(zmq_ctx: zmq.Context):
     model_service_pb2_grpc.add_ModelServiceServicer_to_server(servicer, server)
     server.add_insecure_port(f"[::]:{GRPC_PORT}")
     server.start()
-    # server.wait_for_termination() would block; don't call it — it runs in background
+    # Run wait_for_termination in its own thread so the server object stays alive
+    threading.Thread(target=server.wait_for_termination, daemon=True,
+                     name="grpc-stub-lifetime").start()
 
 
 def _start_router(zmq_ctx: zmq.Context):

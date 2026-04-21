@@ -200,16 +200,15 @@ def _load_adapters_via_grpc(client: ModelServiceClient,
 def _start_ours(base_model_id: str, adapter_dirs: dict[str, str],
                 ready: threading.Event) -> None:
     from model_logic.model_endpoint.grpc_server import build_servicer
-    from test.grpc_server_factory.servicer import DelegatingModelServicer
 
-    # build_servicer already loads the model + adapters
     servicer = build_servicer(
         weight_dir=base_model_id,
         max_total_token_num=8192,
         adapter_dirs=adapter_dirs,
     )
-    _make_grpc_server(servicer, PORTS["ours"])
+    server = _make_grpc_server(servicer, PORTS["ours"])
     ready.set()
+    server.wait_for_termination()  # keeps server object alive; thread is daemon
 
 
 def _start_peft(base_model_id: str, ready: threading.Event) -> None:
@@ -218,8 +217,9 @@ def _start_peft(base_model_id: str, ready: threading.Event) -> None:
 
     backend = CausalLMPEFTBackend(base_model_id=base_model_id)
     servicer = DelegatingModelServicer(backend)
-    _make_grpc_server(servicer, PORTS["peft"])
+    server = _make_grpc_server(servicer, PORTS["peft"])
     ready.set()
+    server.wait_for_termination()
 
 
 def _start_vllm(base_model_id: str, ready: threading.Event) -> None:
@@ -228,8 +228,9 @@ def _start_vllm(base_model_id: str, ready: threading.Event) -> None:
 
     backend = VLLMBackend(base_model_id=base_model_id)
     servicer = DelegatingModelServicer(backend)
-    _make_grpc_server(servicer, PORTS["vllm"])
+    server = _make_grpc_server(servicer, PORTS["vllm"])
     ready.set()
+    server.wait_for_termination()
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
