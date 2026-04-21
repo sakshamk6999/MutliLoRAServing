@@ -62,6 +62,12 @@ def pytest_addoption(parser):
         default=3,
         help="Number of benchmark repetitions to average over (default 3).",
     )
+    parser.addoption(
+        "--backend",
+        default="ours",
+        choices=["ours", "peft", "vllm"],
+        help="Which serving backend to test: ours | peft | vllm (default: ours).",
+    )
 
 
 def pytest_configure(config):

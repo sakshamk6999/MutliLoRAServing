@@ -1,18 +1,33 @@
 """
 Real-world end-to-end test.
 
-Starts every service with real weights and runs prompts through the full pipeline.
+Starts one backend (selected via --backend) plus the full service stack
+(FastAPI → MLP → Router → gRPC model server) and runs prompts through it.
 
 Run:
+  # Our custom QwenLoRAModel (default)
   pytest test/test_real_world.py -v -s \\
     --base-model-id Qwen/Qwen3-1.7B \\
     --adapter diagnosis:./train_adapters/train-LoRA/adapters/diagnosis \\
     --adapter implementation:./train_adapters/train-LoRA/adapters/implementation \\
-    --max-tokens 128
+    --backend ours
+
+  # PEFT baseline
+  pytest test/test_real_world.py -v -s \\
+    --base-model-id Qwen/Qwen3-1.7B \\
+    --adapter diagnosis:./train_adapters/train-LoRA/adapters/diagnosis \\
+    --backend peft
+
+  # vLLM baseline
+  pytest test/test_real_world.py -v -s \\
+    --base-model-id Qwen/Qwen3-1.7B \\
+    --adapter diagnosis:./train_adapters/train-LoRA/adapters/diagnosis \\
+    --backend vllm
 
 Skip conditions:
   - CUDA not available
   - --base-model-id not supplied
+  - required package not installed for the chosen backend
 """
 
 import os
@@ -198,16 +213,13 @@ def _run_real_mlp(zmq_ctx: zmq.Context,
         print(f"[mlp] {tagged.request_id[:8]}… → {task}")
 
 
-# ── gRPC server with real QwenLoRAModel ────────────────────────────────────────
+# ── gRPC server startup — one function per backend ────────────────────────────
 
-def _start_real_grpc_server(weight_dir: str,
-                             adapter_dirs: dict[str, str],
-                             max_total_token_num: int,
-                             server_ready: threading.Event):
-    """Load Qwen3 + adapters and start gRPC server. Sets server_ready when done."""
+def _start_grpc_ours(weight_dir: str, adapter_dirs: dict[str, str],
+                     max_total_token_num: int, ready: threading.Event):
     from model_logic.model_endpoint.grpc_server import build_servicer
 
-    print(f"[grpc] Loading model {weight_dir!r} with adapters: {list(adapter_dirs)}")
+    print(f"[grpc:ours] loading {weight_dir!r}, adapters={list(adapter_dirs)}")
     servicer = build_servicer(
         weight_dir=weight_dir,
         max_total_token_num=max_total_token_num,
@@ -217,9 +229,53 @@ def _start_real_grpc_server(weight_dir: str,
     model_service_pb2_grpc.add_ModelServiceServicer_to_server(servicer, server)
     server.add_insecure_port(f"[::]:{GRPC_PORT}")
     server.start()
-    print(f"[grpc] server ready on :{GRPC_PORT}")
-    server_ready.set()
+    print(f"[grpc:ours] ready on :{GRPC_PORT}")
+    ready.set()
     server.wait_for_termination()
+
+
+def _start_grpc_peft(weight_dir: str, ready: threading.Event):
+    from test.grpc_server_factory.backends.peft.causal_lm_backend import CausalLMPEFTBackend
+    from test.grpc_server_factory.servicer import DelegatingModelServicer
+
+    print(f"[grpc:peft] loading {weight_dir!r}")
+    backend = CausalLMPEFTBackend(base_model_id=weight_dir)
+    servicer = DelegatingModelServicer(backend)
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
+    model_service_pb2_grpc.add_ModelServiceServicer_to_server(servicer, server)
+    server.add_insecure_port(f"[::]:{GRPC_PORT}")
+    server.start()
+    print(f"[grpc:peft] ready on :{GRPC_PORT}")
+    ready.set()
+    server.wait_for_termination()
+
+
+def _start_grpc_vllm(weight_dir: str, ready: threading.Event):
+    from test.grpc_server_factory.backends.vLLM.vLLM import VLLMBackend
+    from test.grpc_server_factory.servicer import DelegatingModelServicer
+
+    print(f"[grpc:vllm] loading {weight_dir!r}")
+    backend = VLLMBackend(base_model_id=weight_dir)
+    servicer = DelegatingModelServicer(backend)
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
+    model_service_pb2_grpc.add_ModelServiceServicer_to_server(servicer, server)
+    server.add_insecure_port(f"[::]:{GRPC_PORT}")
+    server.start()
+    print(f"[grpc:vllm] ready on :{GRPC_PORT}")
+    ready.set()
+    server.wait_for_termination()
+
+
+def _load_adapters_via_grpc(adapter_dirs: dict[str, str]):
+    """Load adapters into a running gRPC server via the LoadAdapter RPC."""
+    from model_logic.model_endpoint.grpc_client import ModelServiceClient
+
+    client = ModelServiceClient(f"localhost:{GRPC_PORT}")
+    for name, path in adapter_dirs.items():
+        resp = client.load_adapter(adapter_id=name, adapter_path=path)
+        assert resp.status in ("loaded", "already_loaded"), \
+            f"LoadAdapter {name!r} → {resp.status}"
+        print(f"[grpc] adapter {name!r} {resp.status}")
 
 
 # ── App server ─────────────────────────────────────────────────────────────────
@@ -263,24 +319,39 @@ def cli(request):
     adapter_raw   = request.config.getoption("--adapter")
     classifier    = request.config.getoption("--classifier")
     max_tokens    = request.config.getoption("--max-tokens")
+    backend       = request.config.getoption("--backend")
 
     if not base_model_id:
         pytest.skip("--base-model-id not provided; skipping real-world tests")
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available; skipping real-world tests")
 
+    if backend == "peft":
+        try:
+            import peft  # noqa: F401
+        except ImportError:
+            pytest.skip("peft not installed; skipping peft backend tests")
+    elif backend == "vllm":
+        try:
+            import vllm  # noqa: F401
+        except ImportError:
+            pytest.skip("vllm not installed; skipping vllm backend tests")
+
     adapters = _parse_adapters(adapter_raw)
     return {
         "base_model_id": base_model_id,
-        "adapters": adapters,       # {name: path}
+        "adapters": adapters,
         "classifier": classifier,
         "max_tokens": max_tokens,
+        "backend": backend,
     }
 
 
 @pytest.fixture(scope="module")
 def running_services(cli):
     """Start all services once for the entire module."""
+    backend = cli["backend"]
+    print(f"\n[fixture] backend={backend!r}")
 
     # Patch module constants to use test ports
     import router.router_service as rrs
@@ -294,22 +365,25 @@ def running_services(cli):
 
     zmq_ctx = zmq.Context()
 
-    # 1. gRPC server (real model — this is the slow step)
+    # 1. gRPC backend server
     grpc_ready = threading.Event()
-    threading.Thread(
-        target=_start_real_grpc_server,
-        args=(
-            cli["base_model_id"],
-            cli["adapters"],
-            8192,
-            grpc_ready,
-        ),
-        daemon=True,
-        name="grpc-server",
-    ).start()
-    print(f"\n[fixture] Waiting up to {MODEL_LOAD_TIMEOUT}s for model to load…")
+    if backend == "ours":
+        target, args = _start_grpc_ours, (
+            cli["base_model_id"], cli["adapters"], 8192, grpc_ready)
+    elif backend == "peft":
+        target, args = _start_grpc_peft, (cli["base_model_id"], grpc_ready)
+    else:  # vllm
+        target, args = _start_grpc_vllm, (cli["base_model_id"], grpc_ready)
+
+    threading.Thread(target=target, args=args,
+                     daemon=True, name=f"grpc-{backend}").start()
+    print(f"[fixture] waiting up to {MODEL_LOAD_TIMEOUT}s for {backend!r} to load…")
     assert grpc_ready.wait(MODEL_LOAD_TIMEOUT), \
-        f"gRPC server did not become ready within {MODEL_LOAD_TIMEOUT}s"
+        f"{backend!r} gRPC server did not become ready within {MODEL_LOAD_TIMEOUT}s"
+
+    # peft / vllm don't pre-load adapters at startup — load via RPC now
+    if backend in ("peft", "vllm"):
+        _load_adapters_via_grpc(cli["adapters"])
 
     # 2. MLP (real classifier or keyword stub)
     mlp_ready = threading.Event()
@@ -345,7 +419,7 @@ def running_services(cli):
     assert app_ready.wait(SERVICE_READY_TIMEOUT), "App server did not become ready"
 
     time.sleep(0.5)  # let ZMQ sockets settle
-    print("[fixture] All services ready.\n")
+    print(f"[fixture] all services ready (backend={backend!r})\n")
     yield
 
 
