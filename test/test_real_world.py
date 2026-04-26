@@ -65,9 +65,10 @@ ZMQ_APP_PORT    = 5575
 ZMQ_MLP_PORT    = 5576
 ZMQ_RESULT_PORT = 5577
 
-MODEL_LOAD_TIMEOUT = 300   # seconds — Qwen3-1.7B needs ~60-120 s on first load
+MODEL_LOAD_TIMEOUT = 300    # seconds — Qwen3-1.7B needs ~60-120 s on first load
 SERVICE_READY_TIMEOUT = 30
-GENERATION_TIMEOUT = 120   # per prompt
+GENERATION_TIMEOUT = 120    # per prompt (single-request tests)
+BULK_GENERATION_TIMEOUT = 300  # per prompt for bulk test (server may be busy with earlier requests)
 POLL_INTERVAL = 1.0
 
 # ── Prompt pool ───────────────────────────────────────────────────────────────
@@ -306,14 +307,46 @@ def _parse_adapters(raw: list[str]) -> dict[str, str]:
 
 # ── Keyword-based MLP stub ─────────────────────────────────────────────────────
 
-# Ordered list: first match wins
+# Ordered list: first match wins.
+# Keywords are matched case-insensitively against the full prompt.
 _KEYWORD_RULES: list[tuple[str, list[str]]] = [
-    ("implementation",        ["function", "def ", "code", "python", "write a ", "implement", "algorithm", "class "]),
-    ("rewriting_and_drafting",["rewrite", "rephrase", "draft", "revise", "edit", "more formal", "tone"]),
-    ("safe_refusal",          ["illegal", "synthesise", "weapon", "harm", "dangerous", "how to make", "how can i make"]),
-    ("grounded_qa",           ["passage:", "based on", "according to", "question:"]),
-    ("information_extraction",["extract", "entities", "named entity", "list all", "identify"]),
-    ("diagnosis",             ["patient", "symptom", "fever", "diagnosis", "disease", "clinical", "treatment"]),
+    ("implementation", [
+        "function", "def ", "code", "python", "write a ", "implement",
+        "algorithm", "class ", "sort", "search", "binary", "linked list",
+        "lru cache", "fibonacci", "quicksort", "flatten", "balanced",
+        "anagram", "bfs", "traversal",
+    ]),
+    ("rewriting_and_drafting", [
+        "rewrite", "rephrase", "draft", "revise", "edit", "more formal",
+        "tone", "concise", "professional email", "executive summary",
+        "plain language", "business report", "formal tone", "empathetic",
+        "acknowledgment",
+    ]),
+    ("safe_refusal", [
+        "illegal", "synthesise", "synthesize", "weapon", "bomb", "explosive",
+        "harm", "dangerous", "how to make", "how can i make",
+        "bypass", "login screen", "without the password",
+        "hack", "bank account", "without their knowledge",
+        "chlorine gas", "toxic gas", "poison",
+        "fake id", "fake government", "forged", "obtain a fake",
+    ]),
+    ("grounded_qa", [
+        "passage:", "based on", "according to", "question:",
+    ]),
+    ("information_extraction", [
+        "extract", "entities", "named entity", "list all", "identify",
+        "organisation names", "person names", "locations mentioned",
+        "dates from", "person, role", "email addresses", "phone numbers",
+        "product names", "company, ceo",
+    ]),
+    ("diagnosis", [
+        "patient", "symptom", "fever", "diagnosis", "disease", "clinical",
+        "treatment", "presents with", "cough", "chest pain", "headache",
+        "memory loss", "ear pain", "shortness of breath", "dyspnoea",
+        "polyuria", "polydipsia", "sore throat", "exudate", "lymphadenopathy",
+        "haemoglobin", "anaemia", "pallor", "fatigue", "fracture",
+        "femoral", "pleuritic", "thunderclap", "photophobia",
+    ]),
 ]
 
 
@@ -477,13 +510,6 @@ def _start_app_server(app_mod) -> threading.Event:
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
-def pytest_configure(config):
-    config.addinivalue_line(
-        "markers",
-        "real_world: requires CUDA + model weights via --base-model-id",
-    )
-
-
 @pytest.fixture(scope="module")
 def cli(request):
     """Parsed CLI options."""
@@ -613,7 +639,7 @@ def running_services(cli):
 
 # ── Metrics collection ─────────────────────────────────────────────────────────
 
-from dataclasses import dataclass as _dc, field as _field
+from dataclasses import dataclass as _dc
 import statistics as _stats
 
 @_dc
@@ -645,8 +671,8 @@ def _queue_prompt(prompt: str, max_tokens: int) -> str:
     return body["request_id"]
 
 
-def _poll(request_id: str) -> dict:
-    deadline = time.monotonic() + GENERATION_TIMEOUT
+def _poll(request_id: str, timeout: int = GENERATION_TIMEOUT) -> dict:
+    deadline = time.monotonic() + timeout
     with httpx.Client() as c:
         while time.monotonic() < deadline:
             resp = c.get(f"{BASE_URL}/result/{request_id}", timeout=10.0)
@@ -655,7 +681,7 @@ def _poll(request_id: str) -> dict:
             assert resp.status_code == 202, \
                 f"Unexpected status {resp.status_code}: {resp.text}"
             time.sleep(POLL_INTERVAL)
-    pytest.fail(f"No result for {request_id} after {GENERATION_TIMEOUT}s")
+    pytest.fail(f"No result for {request_id} after {timeout}s")
 
 
 def _record(test: str, adapter: str, result: dict):
@@ -752,7 +778,7 @@ def test_bulk_heterogeneous_requests(running_services, cli):
 
     results_map: dict[str, dict] = {}
     for rid, adapter, mt, exp in queued:
-        res = _poll(rid)
+        res = _poll(rid, timeout=BULK_GENERATION_TIMEOUT)
         results_map[rid] = res
         _record("bulk_heterogeneous", adapter, res)
 
@@ -771,7 +797,6 @@ def test_bulk_heterogeneous_requests(running_services, cli):
             )
 
     # ── Per-bucket breakdown ──────────────────────────────────────────────────
-    import statistics as _stats
     from collections import defaultdict
 
     buckets: dict[str, list[float]] = defaultdict(list)
