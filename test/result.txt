@@ -21,3 +21,59 @@ single_request                             0.47x               1.23x
 batch_same_adapter                         2.42x               0.35x
 batch_mixed_adapters                       1.34x               0.70x
 ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────                                                                                                                                          
+                            REAL-WORLD TEST METRICS                                                                                                                                                                       
+  backend=ours  max_tokens=128  num_adapters=1                                                                                                                                                                            
+────────────────────────────────────────────────────────────────────────────────                                                                                                                                          
+  Test / Adapter                          TTFT (s)   E2E (s)  Tokens                                                                                                                                                      
+────────────────────────────────────────────────────────────────────────────────                                                                                                                                          
+  prompt_generates_text/diagnosis            0.060     6.559     107                                                                                                                                                      
+  prompt_generates_text/implementation       0.052     6.596      74                                                                                                                                                      
+  prompt_generates_text/rewriting_and_       0.051     6.572     111                                                                                                                                                      
+  prompt_generates_text/safe_refusal         0.052     6.596     109                                                                                                                                                      
+  prompt_generates_text/grounded_qa          0.052     6.591      99                                                                                                                                                      
+  prompt_generates_text/information_ex       0.052     6.521      66                                                                                                                                                      
+  base_model_no_adapter/base                 0.051     6.551     113                                                                                                                                                      
+  sequential_prompts/unknown                 0.051     6.542     107                                                                                                                                                      
+  adapter_vs_base/implementation             0.052     6.571      74                                                                                                                                                      
+  adapter_vs_base/base                       0.051     6.508      74                                                                                                                                                      
+────────────────────────────────────────────────────────────────────────────────                                                                                                                                          
+  mean TTFT                                  0.052                                                                                                                                                                        
+  p50  TTFT                                  0.052                                                                                                                                                                        
+  mean E2E                                             6.561                                                                                                                                                              
+  throughput (req/s, sequential)             0.152                                                                                                                                                                        
+────────────────────────────────────────────────────────────────────────────────   
+
+
+
+test/test_real_world.py::test_metrics_summary                                                                                                                                                                             
+────────────────────────────────────────────────────────────────────────────────                                                                                                                                          
+                            REAL-WORLD TEST METRICS                                                                                                                                                                       
+  backend=peft  max_tokens=128  num_adapters=1                                                                                                                                                                            
+────────────────────────────────────────────────────────────────────────────────                                                                                                                                          
+  Test / Adapter                          TTFT (s)   E2E (s)  Tokens                                                                                                                                                      
+────────────────────────────────────────────────────────────────────────────────                                                                                                                                          
+  prompt_generates_text/diagnosis            0.294     5.573     133                                                                                                                                                      
+  prompt_generates_text/implementation       0.042     5.322     101                                                                                                                                                      
+  prompt_generates_text/rewriting_and_       0.042     5.319     132                                                                                                                                                      
+  prompt_generates_text/safe_refusal         0.042     5.326     118                                                                                                                                                      
+  prompt_generates_text/grounded_qa          0.042     5.454     110                                                                                                                                                      
+  prompt_generates_text/information_ex       0.043     5.870      95                                                                                                                                                      
+  base_model_no_adapter/base                 0.046     5.794     116                                                                                                                                                      
+  sequential_prompts/unknown                 0.046     5.834     133                                                                                                                                                      
+  adapter_vs_base/implementation             0.046     5.796     101
+  adapter_vs_base/base                       0.046     5.787      75
+────────────────────────────────────────────────────────────────────────────────
+  mean TTFT                                  0.069
+  p50  TTFT                                  0.045
+  mean E2E                                             5.607
+  throughput (req/s, sequential)             0.178
+────────────────────────────────────────────────────────────────────────────────

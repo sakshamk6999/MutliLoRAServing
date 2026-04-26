@@ -5,12 +5,19 @@ Starts one backend (selected via --backend) plus the full service stack
 (FastAPI → MLP → Router → gRPC model server) and runs prompts through it.
 
 Run:
-  # Our custom QwenLoRAModel (default)
+  # Our custom QwenLoRAModel — PyTorch LoRA (default)
   pytest test/test_real_world.py -v -s \\
     --base-model-id Qwen/Qwen3-1.7B \\
     --adapter diagnosis:./train_adapters/train-LoRA/adapters/diagnosis \\
     --adapter implementation:./train_adapters/train-LoRA/adapters/implementation \\
     --backend ours
+
+  # Our custom QwenLoRAModel — Triton LoRA
+  pytest test/test_real_world.py -v -s \\
+    --base-model-id Qwen/Qwen3-1.7B \\
+    --adapter diagnosis:./train_adapters/train-LoRA/adapters/diagnosis \\
+    --adapter implementation:./train_adapters/train-LoRA/adapters/implementation \\
+    --backend ours --lora-backend triton
 
   # PEFT baseline
   pytest test/test_real_world.py -v -s \\
@@ -216,14 +223,17 @@ def _run_real_mlp(zmq_ctx: zmq.Context,
 # ── gRPC server startup — one function per backend ────────────────────────────
 
 def _start_grpc_ours(weight_dir: str, adapter_dirs: dict[str, str],
-                     max_total_token_num: int, ready: threading.Event):
+                     max_total_token_num: int, ready: threading.Event,
+                     use_triton: bool = False):
     from model_logic.model_endpoint.grpc_server import build_servicer
 
-    print(f"[grpc:ours] loading {weight_dir!r}, adapters={list(adapter_dirs)}")
+    print(f"[grpc:ours] loading {weight_dir!r}, adapters={list(adapter_dirs)}, "
+          f"lora_backend={'triton' if use_triton else 'pytorch'}")
     servicer = build_servicer(
         weight_dir=weight_dir,
         max_total_token_num=max_total_token_num,
         adapter_dirs=adapter_dirs,
+        use_triton=use_triton,
     )
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
     model_service_pb2_grpc.add_ModelServiceServicer_to_server(servicer, server)
@@ -321,6 +331,7 @@ def cli(request):
     max_tokens    = request.config.getoption("--max-tokens")
     backend       = request.config.getoption("--backend")
     num_adapters  = request.config.getoption("--num-adapters")
+    lora_backend  = request.config.getoption("--lora-backend")
 
     if not base_model_id:
         pytest.skip("--base-model-id not provided; skipping real-world tests")
@@ -349,6 +360,7 @@ def cli(request):
         "classifier": classifier,
         "max_tokens": max_tokens,
         "backend": backend,
+        "lora_backend": lora_backend,  # "pytorch" | "triton" (only applies when backend="ours")
     }
 
 
@@ -372,10 +384,11 @@ def running_services(cli):
 
     # 1. gRPC backend server — start with NO pre-loaded adapters;
     #    the AdapterCache below handles all loading/eviction on demand.
+    use_triton = (backend == "ours") and (cli["lora_backend"] == "triton")
     grpc_ready = threading.Event()
     if backend == "ours":
         target, args = _start_grpc_ours, (
-            cli["base_model_id"], {}, 8192, grpc_ready)
+            cli["base_model_id"], {}, 8192, grpc_ready, use_triton)
     elif backend == "peft":
         target, args = _start_grpc_peft, (cli["base_model_id"], grpc_ready)
     else:  # vllm
@@ -609,7 +622,9 @@ def test_metrics_summary(running_services, cli):  # noqa: ARG001
     sep = "─" * 80
     print(f"\n{sep}")
     print(f"  {'REAL-WORLD TEST METRICS':^76}")
-    print(f"  backend={cli['backend']}  "
+    lora_info = (f"  lora_backend={cli['lora_backend']}"
+                 if cli["backend"] == "ours" else "")
+    print(f"  backend={cli['backend']}{lora_info}  "
           f"max_tokens={cli['max_tokens']}  "
           f"num_adapters={cli['num_adapters'] or 'all'}")
     print(sep)

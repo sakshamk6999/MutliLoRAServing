@@ -25,10 +25,12 @@ class QwenLoRAModel(BaseModel):
     def __init__(self, weight_dir: str, max_total_token_num: int,
                  mem_adapter_size: int = 0,
                  adapter_dirs: dict[str, str] | None = None,
-                 load_way: str = "HF", mode=[], dummy: bool = False):
+                 load_way: str = "HF", mode=[], dummy: bool = False,
+                 use_triton: bool = False):
         self.tp_rank_ = 0
         self.world_size_ = 1
         self._pending_adapter_dirs = adapter_dirs or {}
+        self._use_triton = use_triton
         super().__init__(weight_dir, max_total_token_num, mem_adapter_size,
                          load_way=load_way, mode=mode, dummy=dummy)
 
@@ -44,7 +46,7 @@ class QwenLoRAModel(BaseModel):
             LoRATransformerLayerInfer(
                 i, tp_rank=self.tp_rank_, world_size=self.world_size_,
                 network_config=self.config, mode=self.mode,
-                adapter_manager=None)
+                adapter_manager=None, use_triton=self._use_triton)
             for i in range(self.config["n_layer"])
         ]
 

@@ -2,9 +2,10 @@
 Throughput and TTFT benchmark — three backends compared.
 
 Backends:
-  ours   QwenLoRAModel (custom batched LoRA + KV cache)
-  peft   CausalLMPEFTBackend (HF AutoModelForCausalLM + PEFT set_adapter)
-  vllm   VLLMBackend (vLLM AsyncLLMEngine)
+  ours-pytorch   QwenLoRAModel with pure-PyTorch LoRA kernels
+  ours-triton    QwenLoRAModel with Triton LoRA kernels (--lora-backend triton)
+  peft           CausalLMPEFTBackend (HF AutoModelForCausalLM + PEFT set_adapter)
+  vllm           VLLMBackend (vLLM AsyncLLMEngine)
 
 Each backend is started on its own gRPC port.  The same set of prompts is
 sent through each backend and wall-clock times are measured externally from
@@ -22,11 +23,19 @@ Scenarios
   batch_mixed_adapters  batch_size prompts, round-robin across all provided adapters
 
 Run:
+  # PyTorch LoRA (default)
   pytest test/test_benchmark.py -v -s \\
     --base-model-id Qwen/Qwen3-1.7B \\
     --adapter diagnosis:./train_adapters/train-LoRA/adapters/diagnosis \\
     --adapter implementation:./train_adapters/train-LoRA/adapters/implementation \\
     --max-tokens 64 --batch-size 4 --num-runs 3
+
+  # Triton LoRA
+  pytest test/test_benchmark.py -v -s \\
+    --base-model-id Qwen/Qwen3-1.7B \\
+    --adapter diagnosis:./train_adapters/train-LoRA/adapters/diagnosis \\
+    --adapter implementation:./train_adapters/train-LoRA/adapters/implementation \\
+    --max-tokens 64 --batch-size 4 --num-runs 3 --lora-backend triton
 """
 
 from __future__ import annotations
@@ -198,13 +207,14 @@ def _load_adapters_via_grpc(client: ModelServiceClient,
 
 
 def _start_ours(base_model_id: str, adapter_dirs: dict[str, str],
-                ready: threading.Event) -> None:
+                ready: threading.Event, use_triton: bool = False) -> None:
     from model_logic.model_endpoint.grpc_server import build_servicer
 
     servicer = build_servicer(
         weight_dir=base_model_id,
         max_total_token_num=8192,
         adapter_dirs=adapter_dirs,
+        use_triton=use_triton,
     )
     server = _make_grpc_server(servicer, PORTS["ours"])
     ready.set()
@@ -242,6 +252,7 @@ def cli(request):
     max_tokens    = request.config.getoption("--max-tokens")
     batch_size    = request.config.getoption("--batch-size")
     num_runs      = request.config.getoption("--num-runs")
+    lora_backend  = request.config.getoption("--lora-backend")
 
     if not base_model_id:
         pytest.skip("--base-model-id not provided")
@@ -254,15 +265,17 @@ def cli(request):
         adapters[name.strip()] = path.strip()
 
     return dict(base_model_id=base_model_id, adapters=adapters,
-                max_tokens=max_tokens, batch_size=batch_size, num_runs=num_runs)
+                max_tokens=max_tokens, batch_size=batch_size, num_runs=num_runs,
+                lora_backend=lora_backend)
 
 
 @pytest.fixture(scope="module")
 def ours_client(cli):
+    use_triton = cli["lora_backend"] == "triton"
     ready = threading.Event()
     t = threading.Thread(
         target=_start_ours,
-        args=(cli["base_model_id"], cli["adapters"], ready),
+        args=(cli["base_model_id"], cli["adapters"], ready, use_triton),
         daemon=True, name="backend-ours",
     )
     t.start()
@@ -398,13 +411,39 @@ def _print_table(results: list[ScenarioResult]):
     for r in results:
         by_scenario.setdefault(r.scenario, {})[r.backend] = r
 
-    # Collect which baselines are actually present
+    # Identify all "ours-*" backends and external baselines
+    ours_backends = sorted({r.backend for r in results if r.backend.startswith("ours-")})
     present_baselines = sorted({
-        r.backend for r in results if r.backend != "ours"
+        r.backend for r in results if not r.backend.startswith("ours-")
     })
 
-    if present_baselines:
-        print(f"\n{'Speedup  (ours vs baselines)':^100}")
+    def _ratio(base_val, cand_val, higher_better=False):
+        if base_val is None or cand_val is None:
+            return "n/a"
+        v = (base_val / cand_val) if not higher_better else (cand_val / base_val)
+        return f"{v:.2f}x"
+
+    if len(ours_backends) > 1:
+        # Compare pytorch vs triton side-by-side
+        ref_backend = next((b for b in ours_backends if "pytorch" in b), ours_backends[0])
+        cmp_backend = next((b for b in ours_backends if b != ref_backend), None)
+        if cmp_backend:
+            print(f"\n{'Speedup  (' + cmp_backend + ' vs ' + ref_backend + ')':^100}")
+            print(sep)
+            print(f"{'Scenario':<28}  {'TTFT speedup':>18}  {'Throughput speedup':>20}")
+            print(sep)
+            for scenario, by_be in by_scenario.items():
+                ref = by_be.get(ref_backend)
+                cmp = by_be.get(cmp_backend)
+                row = f"{scenario:<28}"
+                row += f"  {_ratio(ref.mean_ttft_s if ref else None, cmp.mean_ttft_s if cmp else None):>18}"
+                row += f"  {_ratio(cmp.mean_throughput_rps if cmp else None, ref.mean_throughput_rps if ref else None, True):>20}"
+                print(row)
+            print(sep + "\n")
+
+    if present_baselines and ours_backends:
+        ours_label = ours_backends[0]
+        print(f"\n{'Speedup  (' + ours_label + ' vs baselines)':^100}")
         print(sep)
         header = f"{'Scenario':<28}"
         for bl in present_baselines:
@@ -412,14 +451,8 @@ def _print_table(results: list[ScenarioResult]):
         print(header)
         print(sep)
 
-        def _ratio(base_val, cand_val, higher_better=False):
-            if base_val is None or cand_val is None:
-                return "n/a"
-            v = (base_val / cand_val) if not higher_better else (cand_val / base_val)
-            return f"{v:.2f}x"
-
         for scenario, by_be in by_scenario.items():
-            ours = by_be.get("ours")
+            ours = by_be.get(ours_label)
             if ours is None:
                 continue
             row = f"{scenario:<28}"
@@ -438,12 +471,13 @@ def _print_table(results: list[ScenarioResult]):
 all_results: list[ScenarioResult] = []
 
 
-def _active_backends(ours_client, peft_client, vllm_client):
+def _active_backends(ours_client, peft_client, vllm_client, cli):
     """Return only the backends whose clients are available (not None)."""
+    ours_label = f"ours-{cli['lora_backend']}"
     return [
         (name, client)
         for name, client in [
-            ("ours", ours_client),
+            (ours_label, ours_client),
             ("peft", peft_client),
             ("vllm", vllm_client),
         ]
@@ -462,7 +496,7 @@ def test_single_request(ours_client, peft_client, vllm_client, cli):
 
     pairs = [(prompt, adapter_name)]
 
-    for backend_name, client in _active_backends(ours_client, peft_client, vllm_client):
+    for backend_name, client in _active_backends(ours_client, peft_client, vllm_client, cli):
         r = _bench_scenario(
             client, backend_name, "single_request",
             pairs, cli["max_tokens"], cli["num_runs"])
@@ -480,7 +514,7 @@ def test_batch_same_adapter(ours_client, peft_client, vllm_client, cli):
     """Batch of N requests, all same adapter."""
     pairs = _pick_prompts(cli["adapters"], cli["batch_size"], mixed=False)
 
-    for backend_name, client in _active_backends(ours_client, peft_client, vllm_client):
+    for backend_name, client in _active_backends(ours_client, peft_client, vllm_client, cli):
         r = _bench_scenario(
             client, backend_name, "batch_same_adapter",
             pairs, cli["max_tokens"], cli["num_runs"])
@@ -505,7 +539,7 @@ def test_batch_mixed_adapters(ours_client, peft_client, vllm_client, cli):
 
     pairs = _pick_prompts(cli["adapters"], cli["batch_size"], mixed=True)
 
-    for backend_name, client in _active_backends(ours_client, peft_client, vllm_client):
+    for backend_name, client in _active_backends(ours_client, peft_client, vllm_client, cli):
         r = _bench_scenario(
             client, backend_name, "batch_mixed_adapters",
             pairs, cli["max_tokens"], cli["num_runs"])

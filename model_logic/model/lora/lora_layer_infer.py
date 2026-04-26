@@ -25,9 +25,11 @@ def _build_token_mask(req_mask: torch.Tensor, infer_state, is_prefill: bool) -> 
 
 class LoRATransformerLayerInfer(Qwen3TransformerLayerInfer):
     def __init__(self, layer_idx, tp_rank=0, world_size=1,
-                 network_config=None, mode=[], adapter_manager=None):
+                 network_config=None, mode=[], adapter_manager=None,
+                 use_triton: bool = False):
         super().__init__(layer_idx, tp_rank, world_size, network_config, mode)
-        self.adapter_manager = adapter_manager  # injected after construction
+        self.adapter_manager = adapter_manager
+        self.use_triton = use_triton
 
     # ------------------------------------------------------------------ #
 
@@ -44,19 +46,15 @@ class LoRATransformerLayerInfer(Qwen3TransformerLayerInfer):
         residual = hidden_states
         normed = _rms_norm(hidden_states, layer_weight.attn_norm_weight, self.rms_norm_eps)
 
-        # Base projections for the full batch
         q = F.linear(normed, layer_weight.q_proj_weight, layer_weight.q_proj_bias)
         k = F.linear(normed, layer_weight.k_proj_weight, layer_weight.k_proj_bias)
         v = F.linear(normed, layer_weight.v_proj_weight, layer_weight.v_proj_bias)
 
-        # Apply LoRA deltas for q, k, v
         if self.adapter_manager is not None and infer_state.adapter_ids_int is not None:
             q, k, v = self._apply_qkv_lora(normed, q, k, v, infer_state, is_prefill)
 
-        # Attention (inherits from Qwen3TransformerLayerInfer but we pass q/k/v directly)
         attn_out = self._attention_from_qkv(q, k, v, infer_state, layer_weight, is_prefill)
 
-        # Apply LoRA delta for o_proj
         if self.adapter_manager is not None and infer_state.adapter_ids_int is not None:
             attn_out = self._apply_o_lora(attn_out, infer_state, layer_weight, is_prefill)
         else:
@@ -70,11 +68,25 @@ class LoRATransformerLayerInfer(Qwen3TransformerLayerInfer):
         return residual + ffn_out
 
     # ------------------------------------------------------------------ #
-    #  LoRA delta application                                             #
+    #  LoRA delta dispatch                                                 #
     # ------------------------------------------------------------------ #
 
     def _apply_qkv_lora(self, normed, q, k, v, infer_state, is_prefill):
-        adapter_ids_int = infer_state.adapter_ids_int  # [batch_size]
+        if self.use_triton and is_prefill:
+            return self._apply_qkv_lora_triton(normed, q, k, v, infer_state)
+        return self._apply_qkv_lora_pytorch(normed, q, k, v, infer_state, is_prefill)
+
+    def _apply_o_lora(self, attn_hidden, infer_state, layer_weight, is_prefill):
+        if self.use_triton and is_prefill:
+            return self._apply_o_lora_triton(attn_hidden, infer_state, layer_weight)
+        return self._apply_o_lora_pytorch(attn_hidden, infer_state, layer_weight, is_prefill)
+
+    # ------------------------------------------------------------------ #
+    #  PyTorch LoRA path                                                   #
+    # ------------------------------------------------------------------ #
+
+    def _apply_qkv_lora_pytorch(self, normed, q, k, v, infer_state, is_prefill):
+        adapter_ids_int = infer_state.adapter_ids_int
         unique_ids = adapter_ids_int.unique()
 
         for aid_int in unique_ids:
@@ -97,9 +109,7 @@ class LoRATransformerLayerInfer(Qwen3TransformerLayerInfer):
 
         return q, k, v
 
-    def _apply_o_lora(self, attn_hidden: torch.Tensor, infer_state, layer_weight, is_prefill):
-        """Apply o_proj linear + LoRA delta."""
-        # Base o_proj
+    def _apply_o_lora_pytorch(self, attn_hidden, infer_state, layer_weight, is_prefill):
         out = F.linear(attn_hidden, layer_weight.o_proj_weight,
                        layer_weight.o_proj_bias if layer_weight.o_proj_bias is not None else None)
 
@@ -122,6 +132,187 @@ class LoRATransformerLayerInfer(Qwen3TransformerLayerInfer):
             x_sub = attn_hidden[token_mask]
             delta = (x_sub @ A.T) @ B.T * scaling
             out[token_mask] = out[token_mask] + delta
+
+        return out
+
+    # ------------------------------------------------------------------ #
+    #  Triton LoRA path (prefill only)                                     #
+    # ------------------------------------------------------------------ #
+
+    def _build_triton_state(self, infer_state):
+        """Build shared index tensors for triton kernel calls.
+
+        Returns (unique_int_ids, local_id_map, max_rank, b_indicies, b_lora_ranks,
+                 b_lora_start, b_loc) or None if no active adapters.
+
+        Memory layout (per projection):
+          - b_lora_ranks[a] = actual_rank * 4   (kernel divides by 4 internally)
+          - b_lora_start[a] = a * max_rank       (page start for adapter a)
+          - b_loc = identity [0..total_pages)
+          - Slot num_adapters is the null adapter (scale=0, zero weights)
+        """
+        adapter_ids_int = infer_state.adapter_ids_int
+        active = [x for x in adapter_ids_int.tolist() if x >= 0]
+        if not active:
+            return None
+
+        unique_int_ids = sorted(set(active))
+        num_adapters = len(unique_int_ids)
+        local_id_map = {gid: lid for lid, gid in enumerate(unique_int_ids)}
+
+        max_rank = 0
+        ranks = {}
+        for gid in unique_int_ids:
+            aid = self.adapter_manager.int_to_adapter_id(gid)
+            A, _, _ = self.adapter_manager.get_lora_weights(aid, self.layer_idx, "q_proj")
+            r = A.shape[0] if A is not None else 0
+            ranks[gid] = r
+            max_rank = max(max_rank, r)
+
+        if max_rank == 0:
+            return None
+
+        device = adapter_ids_int.device
+        null_slot = num_adapters
+
+        b_indicies = torch.full((infer_state.batch_size,), null_slot,
+                                dtype=torch.int32, device=device)
+        for i, gid in enumerate(adapter_ids_int.tolist()):
+            if gid >= 0:
+                b_indicies[i] = local_id_map[gid]
+
+        # b_lora_ranks: rank*4 for real adapters; max_rank*4 for null (scale=0 guards it)
+        b_lora_ranks = torch.zeros(num_adapters + 1, dtype=torch.int32, device=device)
+        for lid, gid in enumerate(unique_int_ids):
+            b_lora_ranks[lid] = ranks[gid] * 4
+        b_lora_ranks[null_slot] = max_rank * 4
+
+        b_lora_start = torch.arange(num_adapters + 1, dtype=torch.int32, device=device) * max_rank
+        total_pages = (num_adapters + 1) * max_rank
+        b_loc = torch.arange(total_pages, dtype=torch.int32, device=device)
+
+        return unique_int_ids, local_id_map, max_rank, ranks, b_indicies, b_lora_ranks, b_lora_start, b_loc
+
+    def _pack_lora_weights(self, unique_int_ids, local_id_map, ranks, max_rank,
+                           proj_name, feat_out, total_pages, device, dtype):
+        """Pack A and B matrices for one projection into flat page buffers.
+
+        W_A: [total_pages, hidden_size]  — each row is one rank dimension of A
+        W_B: [total_pages, feat_out]     — each row encodes feat_out//rank output dims of B
+        scale_vec: [num_adapters+1]      — null slot has scale=0
+        """
+        hidden_size = self.adapter_manager.hidden_size
+        W_A = torch.zeros(total_pages, hidden_size, dtype=dtype, device=device)
+        W_B = torch.zeros(total_pages, feat_out, dtype=dtype, device=device)
+        scale_vec = torch.zeros(len(unique_int_ids) + 1, dtype=dtype, device=device)
+
+        for lid, gid in enumerate(unique_int_ids):
+            aid = self.adapter_manager.int_to_adapter_id(gid)
+            A, B, sc = self.adapter_manager.get_lora_weights(aid, self.layer_idx, proj_name)
+            if A is None:
+                continue
+            rank = ranks[gid]
+            page_start = lid * max_rank
+
+            # A: [rank, hidden_size] — one row per rank dim
+            W_A[page_start:page_start + rank] = A
+
+            # B: [feat_out, rank] — pack into rank pages each of size feat_out
+            # W_B[page_start+p, n_local*rank+d] = B[p*(feat_out//rank)+n_local, d]
+            # which equals B[p*s:(p+1)*s, :].reshape(-1) in row-major order
+            assert feat_out % rank == 0, (
+                f"feat_out ({feat_out}) must be divisible by rank ({rank}) for triton path"
+            )
+            s = feat_out // rank
+            for p in range(rank):
+                W_B[page_start + p] = B[p * s:(p + 1) * s].reshape(-1)
+
+            scale_vec[lid] = sc
+        # null slot scale stays 0
+
+        return W_A, W_B, scale_vec
+
+    def _apply_qkv_lora_triton(self, normed, q, k, v, infer_state):
+        try:
+            from .triton_kernels.lora_prefill import (
+                lora_get_qkvo_fwd_shrink, lora_get_qkvo_fwd_expand)
+        except ImportError:
+            return self._apply_qkv_lora_pytorch(normed, q, k, v, infer_state, is_prefill=True)
+
+        state = self._build_triton_state(infer_state)
+        if state is None:
+            return q, k, v
+
+        unique_int_ids, local_id_map, max_rank, ranks, b_indicies, b_lora_ranks, b_lora_start, b_loc = state
+        total_tokens = normed.shape[0]
+        hidden_size = normed.shape[1]
+        total_pages = b_loc.shape[0]
+        device = normed.device
+        dtype = normed.dtype
+
+        for proj_name, proj_out in [("q_proj", q), ("k_proj", k), ("v_proj", v)]:
+            feat_out = proj_out.shape[1]
+            W_A, W_B, scale_vec = self._pack_lora_weights(
+                unique_int_ids, local_id_map, ranks, max_rank,
+                proj_name, feat_out, total_pages, device, dtype)
+
+            intermediate = torch.zeros(total_tokens, max_rank, dtype=dtype, device=device)
+
+            lora_get_qkvo_fwd_shrink(
+                normed, W_A, intermediate,
+                b_loc, b_lora_start, b_lora_ranks,
+                infer_state.b_start_loc, infer_state.b_seq_len, b_indicies,
+                hidden_size, 0, max_rank, infer_state.max_len_in_batch,
+            )
+            lora_get_qkvo_fwd_expand(
+                intermediate, W_B, proj_out, scale_vec,
+                b_loc, b_lora_start, b_lora_ranks,
+                infer_state.b_start_loc, infer_state.b_seq_len, b_indicies,
+                feat_out, 0, max_rank, infer_state.max_len_in_batch,
+            )
+
+        return q, k, v
+
+    def _apply_o_lora_triton(self, attn_hidden, infer_state, layer_weight):
+        out = F.linear(attn_hidden, layer_weight.o_proj_weight,
+                       layer_weight.o_proj_bias if layer_weight.o_proj_bias is not None else None)
+
+        try:
+            from .triton_kernels.lora_prefill import (
+                lora_get_qkvo_fwd_shrink, lora_get_qkvo_fwd_expand)
+        except ImportError:
+            return self._apply_o_lora_pytorch(attn_hidden, infer_state, layer_weight, is_prefill=True)
+
+        state = self._build_triton_state(infer_state)
+        if state is None:
+            return out
+
+        unique_int_ids, local_id_map, max_rank, ranks, b_indicies, b_lora_ranks, b_lora_start, b_loc = state
+        total_tokens = attn_hidden.shape[0]
+        hidden_size = attn_hidden.shape[1]
+        feat_out = out.shape[1]
+        total_pages = b_loc.shape[0]
+        device = attn_hidden.device
+        dtype = attn_hidden.dtype
+
+        W_A, W_B, scale_vec = self._pack_lora_weights(
+            unique_int_ids, local_id_map, ranks, max_rank,
+            "o_proj", feat_out, total_pages, device, dtype)
+
+        intermediate = torch.zeros(total_tokens, max_rank, dtype=dtype, device=device)
+
+        lora_get_qkvo_fwd_shrink(
+            attn_hidden, W_A, intermediate,
+            b_loc, b_lora_start, b_lora_ranks,
+            infer_state.b_start_loc, infer_state.b_seq_len, b_indicies,
+            hidden_size, 0, max_rank, infer_state.max_len_in_batch,
+        )
+        lora_get_qkvo_fwd_expand(
+            intermediate, W_B, out, scale_vec,
+            b_loc, b_lora_start, b_lora_ranks,
+            infer_state.b_start_loc, infer_state.b_seq_len, b_indicies,
+            feat_out, 0, max_rank, infer_state.max_len_in_batch,
+        )
 
         return out
 

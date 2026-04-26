@@ -74,6 +74,12 @@ def pytest_addoption(parser):
         default=None,
         help="Max number of adapters to load (default: all provided via --adapter).",
     )
+    parser.addoption(
+        "--lora-backend",
+        default="pytorch",
+        choices=["pytorch", "triton"],
+        help="LoRA kernel backend for the 'ours' model: pytorch | triton (default: pytorch).",
+    )
 
 
 def pytest_configure(config):

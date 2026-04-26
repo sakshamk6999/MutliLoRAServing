@@ -278,14 +278,16 @@ def build_servicer(
     max_total_token_num: int = 8192,
     mem_adapter_size: int = 0,
     adapter_dirs: dict[str, str] | None = None,
+    use_triton: bool = False,
 ) -> ModelServiceServicer:
-    print(f"[server] Loading model from {weight_dir} ...")
+    print(f"[server] Loading model from {weight_dir} (lora_backend={'triton' if use_triton else 'pytorch'}) ...")
     tokenizer = AutoTokenizer.from_pretrained(weight_dir, trust_remote_code=True)
     model = QwenLoRAModel(
         weight_dir=weight_dir,
         max_total_token_num=max_total_token_num,
         mem_adapter_size=mem_adapter_size,
         adapter_dirs=adapter_dirs or {},
+        use_triton=use_triton,
     )
     print("[server] Model ready.")
     return ModelServiceServicer(model, tokenizer)
