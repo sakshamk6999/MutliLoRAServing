@@ -277,6 +277,6 @@ class Qwen3TransformerLayerInfer:
 
     def _ffn(self, x: torch.Tensor, layer_weight) -> torch.Tensor:
         gate = F.linear(x, layer_weight.gate_proj_weight)
-        torch.nn.functional.silu_(gate)
+        F.silu(gate, inplace=True)
         up = F.linear(x, layer_weight.up_proj_weight)
         return F.linear(gate * up, layer_weight.down_proj_weight)
